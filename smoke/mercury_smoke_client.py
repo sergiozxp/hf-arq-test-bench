@@ -16,8 +16,13 @@ QUÉ HACE
     rechazado, cualquier otra cosa o silencio = respuesta no reconocida (fallo). Guarda
     siempre las líneas crudas.
   - Registra la línea CONNECTED completa y la valida: `CONNECTED <origen> <destino> <ancho>`
-    (origen = quien inició la sesión). Se compara el ancho (500 o BW500 se toleran) y los
-    indicativos; un indicativo distinto del esperado es fallo.
+    (origen = quien inició la sesión). Se exigen exactamente 4 campos; se compara el ancho
+    (500 o BW500 se toleran) y los indicativos. Forma distinta, ancho o indicativos
+    incorrectos son fallo. El SSID, si Mercury lo devuelve, se compara como parte del texto.
+  - DISCONNECT con la sesión activa se juzga como cualquier comando. En la limpieza final
+    (si no se vio DISCONNECTED) una respuesta que no sea OK es un estado permitido: se
+    registra en `desconexion_limpieza` y lo que se juzga es el estado final.
+  - En `listen`, `--bw-when after` envía BW tras CONNECTED, igual que el emisor.
   - Emisor: escribe en 8301 la cabecera de 16 B + payload, espera una línea `BUFFER 0`
     con marca de tiempo ESTRICTAMENTE posterior al inicio de la escritura, y manda
     DISCONNECT.
@@ -38,6 +43,11 @@ QUÉ NO HACE
   - No reintenta ni reinicia Mercury; no modifica Mercury ni su configuración.
   - No decide que algo "llegó" por BUFFER 0: el emisor deja `entregado_integro`
     en null. La entrega la establece smoke_cross_check.py con el resultado de B.
+  - Supone que Mercury responde OK/WRONG una vez por comando y EN ORDEN (precondición a
+    verificar en E0-2). Si hubiera respuestas atrasadas, una OK podría asociarse al comando
+    siguiente; el script no correlaciona respuestas por comando.
+  - No distingue, solo por marcas de recepción, un BUFFER 0 viejo retenido en el búfer TCP.
+    Anota `buffer_positivo_antes_de_cero` (observación) para decidir en v7 si se exige.
   - El código de salida 0 de `send` significa SOLO "sesión emisora completada": no es
     entrega. La entrega se lee en el resultado del receptor y en el cruce.
   - No espera a que B termine de validar antes de enviar DISCONNECT (v6, H1, paso 4).
@@ -68,7 +78,7 @@ import time
 import traceback
 
 from smoke_common import (HEADER_LEN, RunLog, TcpCapture, capture_environment,
-                          capture_final, load_config, make_header, make_payload,
+                          capture_final, load_config, problemas_de_evidencia, make_header, make_payload,
                           mono_ns, parse_header, sha256_bytes)
 
 RX_CONNECTED = r"^\s*CONNECTED\b"
@@ -121,10 +131,10 @@ def analizar_connected(texto: str, bw_cmd: str, mi: str, otro: str, rol: str) ->
     campos = texto.split()
     esperado = solo_digitos(bw_cmd)
     info = {"linea": texto, "campos": campos, "ancho_esperado": esperado,
+            "forma_valida": len(campos) == 4,  # CONNECTED origen destino ancho
             "ancho_coincide": None, "indicativos_coinciden": None}
-    if len(campos) >= 4:
-        info["ancho_coincide"] = solo_digitos(campos[-1]) == esperado
     if len(campos) == 4:
+        info["ancho_coincide"] = solo_digitos(campos[-1]) == esperado
         esp = (mi, otro) if rol == "send" else (otro, mi)
         info["indicativos_coinciden"] = (campos[1].upper(), campos[2].upper()) == \
             (esp[0].upper(), esp[1].upper())
@@ -134,20 +144,28 @@ def analizar_connected(texto: str, bw_cmd: str, mi: str, otro: str, rol: str) ->
 
 def fallos_de_connected(info: dict) -> list[str]:
     f = []
-    if info["ancho_coincide"] is False:
+    if not info["forma_valida"]:
+        f.append("línea CONNECTED con forma inesperada: se esperan 4 campos "
+                 "(CONNECTED origen destino ancho)")
+        return f
+    if info["ancho_coincide"] is not True:
         f.append("ancho reportado en CONNECTED no coincide con el configurado")
-    if info["indicativos_coinciden"] is False:
+    if info["indicativos_coinciden"] is not True:
         f.append("los indicativos de CONNECTED no son los esperados")
     return f
 
 
-def asegurar_desconexion(cmd: TcpCapture, espera_s: float, desde: int) -> str:
-    """Envía DISCONNECT si no se vio DISCONNECTED y confirma el estado final."""
+def asegurar_desconexion(cmd: TcpCapture, espera_s: float, desde: int, win: float):
+    """Si no se vio DISCONNECTED, envía DISCONNECT de limpieza y confirma el estado final.
+    Aquí una respuesta que no sea OK es un estado PERMITIDO (la sesión pudo terminar justo
+    antes): no es fallo, pero se devuelve para registrarla en `desconexion_limpieza`.
+    Lo que se juzga es el estado final (DISCONNECTED visto o no)."""
     visto = cmd.wait_line(RX_DISCONNECTED, 0.1, start=desde)
+    limpieza = None
     if visto is None:
-        cmd.command("DISCONNECT", 0.2)
+        limpieza = enviar_comando(cmd, "DISCONNECT", win)
         visto = cmd.wait_line(RX_DISCONNECTED, espera_s, start=desde)
-    return "desconectado" if visto else "no_confirmado"
+    return ("desconectado" if visto else "no_confirmado"), limpieza
 
 
 def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
@@ -206,16 +224,23 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                     buffers = [(segundos(t_w0, t), txt) for t, txt in cmd.lines[idx_w:]
                                if re.search(RX_BUFFER, txt)]
                 res["lineas_buffer"] = buffers
+                t_cero = segundos(t_w0, b0[1][0]) if b0 else None
+                # Observación (no criterio): si Mercury informa BUFFER > 0 tras escribir, el
+                # BUFFER 0 posterior es una transición real y no un valor viejo retrasado.
+                res["buffer_positivo_antes_de_cero"] = any(
+                    int(re.search(RX_BUFFER, txt).group(1)) > 0 and (t_cero is None or t <= t_cero)
+                    for t, txt in buffers)
                 if b0 is None:
                     fallos.append("no se vio BUFFER 0 posterior al envío (timeout o cierre)")
                 else:
                     res["arq_confirmado"] = True
                     res["t_transferencia_s"] = segundos(t_w0, b0[1][0])
-                # La respuesta a DISCONNECT se registra, pero no se juzga (puede ser WRONG si
-                # la sesión ya terminó).
+                # La sesión sigue activa: DISCONNECT debe ser aceptado (OK).
                 respuestas["disconnect"] = enviar_comando(cmd, "DISCONNECT", win)
+                juzgar(respuestas["disconnect"], "DISCONNECT", fallos)
     res["t_conexion_s"] = segundos(t_cmd, t_conn)
-    res["estado_final"] = asegurar_desconexion(cmd, m["disconnect_wait_s"], idx0)
+    res["estado_final"], res["desconexion_limpieza"] = asegurar_desconexion(
+        cmd, m["disconnect_wait_s"], idx0, win)
     if res["estado_final"] != "desconectado":
         fallos.append("no se confirmó DISCONNECTED")
     res["respuestas"] = respuestas
@@ -253,9 +278,6 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     if not fallos:
         respuestas["listen"] = enviar_comando(cmd, "LISTEN ON", win)
         if juzgar(respuestas["listen"], "LISTEN ON", fallos):
-            if args.bw_when == "after":
-                enviar_bw()
-
             rlog.log("esperando_conexion")
             r = cmd.wait_line(RX_CONNECTED, m["listen_timeout_s"], start=idx0)
             if r is None:
@@ -265,6 +287,8 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                 res["connected"] = analizar_connected(r[1][1], m["bw_command"], m["mycall"],
                                                       m["peer_call"], "listen")
                 fallos += fallos_de_connected(res["connected"])
+                if args.bw_when == "after":   # igual que el emisor: tras CONNECTED
+                    enviar_bw()
                 try:
                     cab = data.read_exact(HEADER_LEN, m["idle_timeout_s"])
                     largo, hash_trunc = parse_header(cab)
@@ -291,7 +315,8 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                 d = cmd.wait_line(RX_DISCONNECTED, m["disconnect_wait_s"], start=idx0)
                 if d:
                     t_disc = d[1][0]
-    res["estado_final"] = asegurar_desconexion(cmd, m["disconnect_wait_s"], idx0)
+    res["estado_final"], res["desconexion_limpieza"] = asegurar_desconexion(
+        cmd, m["disconnect_wait_s"], idx0, win)
 
     esperado_total = HEADER_LEN + res.get("longitud_declarada", 0)
     total = sum(n for _, n in data.chunks)
@@ -338,10 +363,11 @@ def main() -> int:
     m = cfg["mercury"]
     puertos = (m["cmd_port"], m["data_port"])
     cmd = data = None
+    env: dict = {}
     res: dict = {"modo": args.modo, "tag": args.tag, "run_id": rlog.run_id}
     codigo = 1
     try:
-        capture_environment(cfg, rlog, puertos=puertos)
+        env = capture_environment(cfg, rlog, puertos=puertos)
         cmd = TcpCapture("8300", m["host"], m["cmd_port"], rlog, line_mode=True)
         data = TcpCapture("8301", m["host"], m["data_port"], rlog, line_mode=False)
         res = (run_send if args.modo == "send" else run_listen)(args, cfg, rlog, cmd, data)
@@ -356,11 +382,16 @@ def main() -> int:
         for s in (cmd, data):
             if s:
                 s.close()
-        capture_final(cfg, rlog, puertos=puertos)
+        fin = capture_final(cfg, rlog, puertos=puertos)
+        res.update(problemas_de_evidencia(cfg, env, fin))
+        if res["evidencia_incompleta"]:
+            codigo = codigo or 1
         ruta = rlog.save_json("result.json", res)
         rlog.log("fin", resultado_json=str(ruta), fallos=res.get("fallos"))
         rlog.close()
     print(f"\nResultado guardado en: {ruta}")
+    if res.get("evidencia_incompleta"):
+        print("EVIDENCIA INCOMPLETA:", res["evidencia_incompleta"])
     if args.modo == "send":
         print("Código 0 = sesión emisora completada. NO prueba entrega: falta el resultado de B "
               "(smoke_cross_check.py).")

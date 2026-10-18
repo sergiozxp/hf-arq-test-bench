@@ -8,6 +8,8 @@ QUÉ HACE
   - Declara la entrega solo si el receptor la verificó, y la separa de la
     confirmación ARQ del emisor (BUFFER 0).
   - Señala contradicciones: ARQ confirmado pero B sin payload íntegro, o al revés.
+  - Resultado "incompleto" si la entrega se verificó pero falta evidencia que v6 exige guardar
+    (`evidencia_incompleta` en alguno de los dos resultados). Las advertencias se muestran aparte.
   - Guarda cruce.json junto al resultado del receptor.
 
 QUÉ NO HACE
@@ -38,16 +40,22 @@ def main() -> int:
         avisos.append("B verificó el payload pero A no vio BUFFER 0 (ARQ no observado)")
     if not hash_ok:
         avisos.append("el SHA-256 del emisor y del receptor no coinciden o falta alguno")
+    incompleta = (em.get("evidencia_incompleta") or []) + (rx.get("evidencia_incompleta") or [])
+    if incompleta:
+        avisos.append(f"evidencia incompleta (v6 la exige para aprobar): {incompleta}")
     cruce = {
         "tag_emisor": em.get("tag"), "tag_receptor": rx.get("tag"),
         "arq_confirmado_emisor": em.get("arq_confirmado"),
         "entregado_integro_receptor": rx.get("entregado_integro"),
         "hash_coincide_emisor_receptor": hash_ok,
         "fallos_emisor": em.get("fallos"), "fallos_receptor": rx.get("fallos"),
+        "advertencias_emisor": em.get("advertencias"), "advertencias_receptor": rx.get("advertencias"),
         "avisos": avisos,
-        "resultado": "aprobado" if (hash_ok and rx.get("entregado_integro")
-                                    and em.get("completado_emisor")) else "fallo",
     }
+    entrega_ok = bool(hash_ok and rx.get("entregado_integro") and em.get("completado_emisor"))
+    # "incompleto": la entrega se verificó, pero faltan evidencias que v6 exige guardar.
+    cruce["resultado"] = ("fallo" if not entrega_ok
+                          else "incompleto" if incompleta else "aprobado")
     salida = Path(sys.argv[2]).with_name("cruce.json")
     salida.write_text(json.dumps(cruce, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(cruce, ensure_ascii=False, indent=2))

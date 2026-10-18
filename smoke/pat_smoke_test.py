@@ -29,8 +29,11 @@ QUÉ HACE
   - Guarda cada petición y respuesta HTTP (código y cuerpo íntegros).
   - Exige UN solo mensaje con ese UUID (asunto idéntico) y UN solo adjunto, con el mismo
     tamaño y SHA-256 que el envío. El nombre del archivo se anota como observación.
-  - Envía el campo `date` (UTC, RFC 3339) al crear mensajes: según una revisión externa del
-    código de Pat 1.0.0, sin él la API responde HTTP 400. No lo hemos verificado.
+  - Envía el campo `date` (UTC, RFC 3339) al crear mensajes: en el código de Pat 1.0.0
+    (api/mailbox.go, postOutboundMessageHandler) se exige exactamente un `date`, se lee con
+    time.RFC3339 y su falta da HTTP 400. Verificado en el código fuente; no probado en ejecución.
+  - `queue` y `ack-queue` devuelven `ok_local`: el mensaje quedó en la bandeja de salida LOCAL.
+    No es entrega. La entrega solo la decide `check-in` por hash.
 
 QUÉ NO HACE
   - No inicia ni reinicia Pat ni Mercury, ni modifica su configuración (varahf.addr,
@@ -67,8 +70,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from smoke_common import (RunLog, capture_environment, load_config, make_payload,
-                          mono_ns, sha256_bytes)
+from smoke_common import (RunLog, capture_environment, capture_final, load_config,
+                          make_payload, mono_ns, problemas_de_evidencia, sha256_bytes)
 
 
 # ------------------------------------------------------------------ HTTP
@@ -188,7 +191,8 @@ def cmd_queue(a, cfg, rlog, cli):
     # Se imprime la ruta completa: este archivo se copia al PC B para check-in.
     print(f"\nstate.json (copiar al PC B para check-in): {ruta_estado.resolve()}", flush=True)
     ok = st is not None and 200 <= st < 300 and en_salida
-    return {"paso": "queue", **estado, "resultado": "ok" if ok else "fallo"}
+    # "ok_local" = el mensaje se creó y está en la bandeja de salida LOCAL. No dice nada de entrega.
+    return {"paso": "queue", **estado, "resultado": "ok_local" if ok else "fallo"}
 
 
 def cmd_connect(a, cfg, rlog, cli):
@@ -208,6 +212,10 @@ def cmd_checkin(a, cfg, rlog, cli):
     p = cfg["pat"]
     est = json.loads(Path(a.state).read_text(encoding="utf-8"))
     st, resp = cli.llamar("GET", "/api/mailbox/in", "get_in", timeout=p["http_timeout_s"])
+    if st != 200:
+        return {"paso": "check-in", "run_uuid": est["run_uuid"], "codigo_http": st,
+                "resultado": "fallo", "cuerpo_completo_en": cli.ultimo_body,
+                "motivo": f"GET /api/mailbox/in respondió HTTP {st}: no se interpreta la bandeja"}
     lista = como_lista(parsear(resp))
     encontrados = buscar_mensajes(lista, est["run_uuid"])
     res = {"paso": "check-in", "run_uuid": est["run_uuid"], "codigo_http": st,
@@ -266,13 +274,17 @@ def cmd_ack_queue(a, cfg, rlog, cli):
     en_salida = st2 is not None and f"ACK run={a.uuid}" in resp2.decode("utf-8", "replace")
     ok = st is not None and 200 <= st < 300 and en_salida
     return {"paso": "ack-queue", "codigo_post_out": st, "en_bandeja_salida": en_salida,
-            "resultado": "ok" if ok else "fallo"}
+            "resultado": "ok_local" if ok else "fallo"}
 
 
 def cmd_ack_verify(a, cfg, rlog, cli):
     p = cfg["pat"]
     est = json.loads(Path(a.state).read_text(encoding="utf-8"))
     st, resp = cli.llamar("GET", "/api/mailbox/in", "get_in", timeout=p["http_timeout_s"])
+    if st != 200:
+        return {"paso": "ack-verify", "run_uuid": est["run_uuid"], "codigo_http": st,
+                "resultado": "fallo", "cuerpo_completo_en": cli.ultimo_body,
+                "motivo": f"GET /api/mailbox/in respondió HTTP {st}: no se interpreta la bandeja"}
     lista = como_lista(parsear(resp))
     acks = buscar_mensajes(lista, f"ACK run={est['run_uuid']}")
     res = {"paso": "ack-verify", "run_uuid": est["run_uuid"], "codigo_http": st,
@@ -330,8 +342,9 @@ def main() -> int:
     rlog = RunLog(cfg, a.phase, f"{a.tag}_{a.subcomando}")
     cli = Cliente(cfg, rlog)
     res: dict = {"paso": a.subcomando, "tag": a.tag, "run_id": rlog.run_id}
+    env: dict = {}
     try:
-        capture_environment(cfg, rlog)
+        env = capture_environment(cfg, rlog)
         funcion = {"queue": cmd_queue, "connect": cmd_connect, "check-in": cmd_checkin,
                    "ack-queue": cmd_ack_queue, "ack-verify": cmd_ack_verify,
                    "disconnect": cmd_disconnect}[a.subcomando]
@@ -341,11 +354,16 @@ def main() -> int:
         res["excepcion"] = traceback.format_exc()
         rlog.log("excepcion", detalle=res["excepcion"])
     finally:
+        fin = capture_final(cfg, rlog)
+        res.update(problemas_de_evidencia(cfg, env, fin))
         ruta = rlog.save_json("result.json", res)
         rlog.log("fin", resultado=res.get("resultado"), json=str(ruta))
         rlog.close()
     print(f"\nResultado: {res.get('resultado', res.get('sesion'))}  ->  {ruta}")
-    return 0 if res.get("resultado") in ("ok", "aprobado") or res.get("sesion") == "ok_http" else 1
+    if res.get("evidencia_incompleta"):
+        print("EVIDENCIA INCOMPLETA:", res["evidencia_incompleta"])
+    ok = res.get("resultado") in ("ok_local", "aprobado") or res.get("sesion") == "ok_http"
+    return 0 if ok and not res.get("evidencia_incompleta") else 1
 
 
 if __name__ == "__main__":

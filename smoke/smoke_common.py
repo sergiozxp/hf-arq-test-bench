@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import random
 import re
@@ -192,12 +193,36 @@ def registrar_archivos(cfg: dict, rlog: RunLog, etapa: str) -> dict:
             continue
         try:
             destino.mkdir(parents=True, exist_ok=True)
-            copia = destino / Path(ruta).name
+            # La clave va en el nombre: dos archivos distintos con el mismo nombre no se pisan.
+            copia = destino / f"{nombre}__{Path(ruta).name}"
+            origen = os.stat(ruta)
             shutil.copy(ruta, copia)
-            salida[nombre] = {"ruta": ruta, "sha256": sha256_file(copia)}
+            # Un log vivo es una INSTANTÁNEA: se anotan tamaño y fecha del origen al copiar.
+            salida[nombre] = {"ruta": ruta, "sha256": sha256_file(copia),
+                              "bytes_origen": origen.st_size, "mtime_origen": origen.st_mtime,
+                              "bytes_copia": copia.stat().st_size}
         except OSError as e:
             salida[nombre] = {"ruta": ruta, "error": repr(e)}
     return salida
+
+
+def problemas_de_evidencia(cfg: dict, env: dict, fin: dict) -> dict:
+    """Separa lo que invalida la evidencia de lo que solo es una advertencia.
+    - evidencia_incompleta: un archivo de [registrar] SÍ configurado no se pudo copiar
+      (v6 exige guardar mercury.ini, configuración y logs con su SHA-256).
+    - advertencias: [registrar] sin ningún archivo, o fallo de powercfg/audio (mejor esfuerzo)."""
+    incompleta, adv = [], []
+    for reg in (env.get("archivos_registrados_inicio", {}), fin.get("archivos_registrados_fin", {})):
+        for nombre, d in reg.items():
+            if isinstance(d, dict) and "error" in d:
+                incompleta.append(f"{nombre}: {d['error']}")
+    if not any(cfg.get("registrar", {}).values()):
+        adv.append("[registrar] vacío: no se registraron mercury.ini, configuración de Pat ni "
+                   "logs (v6 los exige para el criterio formal)")
+    for k in ("plan_energia", "audio_endpoints"):
+        if str(env.get(k, "")).startswith("ERROR") or not str(env.get(k, "")).strip():
+            adv.append(f"{k}: no se pudo obtener ({str(env.get(k, ''))[:80]})")
+    return {"evidencia_incompleta": list(dict.fromkeys(incompleta)), "advertencias": adv}
 
 
 def capture_final(cfg: dict, rlog: RunLog, puertos=()) -> dict:
