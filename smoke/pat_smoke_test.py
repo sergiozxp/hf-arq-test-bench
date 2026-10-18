@@ -27,6 +27,10 @@ QUÉ HACE
   - Genera el ACK (asunto `ACK run=<UUID>`, cuerpo con el UUID y el SHA-256 completos)
     y lo verifica en A.
   - Guarda cada petición y respuesta HTTP (código y cuerpo íntegros).
+  - Exige UN solo mensaje con ese UUID (asunto idéntico) y UN solo adjunto, con el mismo
+    tamaño y SHA-256 que el envío. El nombre del archivo se anota como observación.
+  - Envía el campo `date` (UTC, RFC 3339) al crear mensajes: según una revisión externa del
+    código de Pat 1.0.0, sin él la API responde HTTP 400. No lo hemos verificado.
 
 QUÉ NO HACE
   - No inicia ni reinicia Pat ni Mercury, ni modifica su configuración (varahf.addr,
@@ -34,7 +38,9 @@ QUÉ NO HACE
   - No reintenta llamadas. Un HTTP 500 en /api/connect se registra como fallo de sesión.
   - No usa NumReceived como prueba de entrega: solo cuenta mensajes nuevos en la
     bandeja de entrada de quien llama, no que el mensaje haya llegado al otro PC.
-  - No usa el estado de la bandeja de salida como criterio (es solo observación).
+  - No usa la bandeja de salida como prueba de ENTREGA. En `queue` sí comprueba que el mensaje
+    quedó en la bandeja de salida local, porque v6 (E0-3, paso 2) lo exige como paso previo;
+    eso no dice nada sobre si llegó al otro PC.
   - No envía el ACK dentro de la misma sesión de datos (eso sería un caso nuevo).
 
 POR QUÉ
@@ -57,6 +63,7 @@ import traceback
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -70,6 +77,7 @@ class Cliente:
         self.base = cfg["pat"]["base_url"].rstrip("/")
         self.rlog = rlog
         self.n = 0
+        self.ultimo_body: str | None = None
 
     def llamar(self, metodo: str, ruta: str, etiqueta: str, *, datos: bytes | None = None,
                tipo: str | None = None, timeout: float = 30) -> tuple[int | None, bytes]:
@@ -88,7 +96,8 @@ class Cliente:
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             status, cuerpo = None, repr(e).encode()
         dur = (mono_ns() - t0) / 1e9
-        (self.rlog.dir / f"http_{self.n:02d}_{etiqueta}.body").write_bytes(cuerpo)
+        self.ultimo_body = f"http_{self.n:02d}_{etiqueta}.body"
+        (self.rlog.dir / self.ultimo_body).write_bytes(cuerpo)
         self.rlog.save_json(f"http_{self.n:02d}_{etiqueta}.json", {
             "metodo": metodo, "url": url, "codigo_http": status, "duracion_s": dur,
             "bytes_cuerpo": len(cuerpo),
@@ -96,6 +105,12 @@ class Cliente:
         self.rlog.log("http", etiqueta=etiqueta, metodo=metodo, url=url,
                       codigo=status, duracion_s=round(dur, 3), bytes=len(cuerpo))
         return status, cuerpo
+
+
+def fecha_rfc3339() -> str:
+    """Pat exige, según la revisión externa del código de Pat 1.0.0 (no verificado por
+    nosotros), un campo `date` al crear un mensaje. Se envía en UTC, RFC 3339."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def multipart(campos: dict[str, str], archivos: list[tuple[str, str, bytes]]):
@@ -138,9 +153,15 @@ def parsear(cuerpo: bytes):
         return None
 
 
-def buscar_mensajes(lista: list, fragmento: str) -> list[dict]:
+def buscar_mensajes(lista: list, asunto: str) -> list[dict]:
+    """Mensajes cuyo asunto es EXACTAMENTE `asunto` (así el ACK, cuyo asunto contiene el
+    UUID, no se confunde con el mensaje original)."""
     return [m for m in lista if isinstance(m, dict)
-            and fragmento in str(getk(m, "Subject", "subject") or "")]
+            and str(getk(m, "Subject", "subject") or "").strip() == asunto]
+
+
+def mids(msgs: list[dict]) -> list:
+    return [getk(m, "MID", "Mid", "id") for m in msgs]
 
 
 # ------------------------------------------------------------ subcomandos
@@ -151,8 +172,10 @@ def cmd_queue(a, cfg, rlog, cli):
     nombre = f"smoke_{a.size}B_{run_uuid[:8]}.bin"
     (rlog.dir / nombre).write_bytes(contenido)
     sha = sha256_bytes(contenido)
+    fecha = fecha_rfc3339()
     cuerpo, tipo = multipart(
-        {"to": p["peer_call"], "subject": run_uuid, "body": f"smoke run {run_uuid}"},
+        {"to": p["peer_call"], "subject": run_uuid, "body": f"smoke run {run_uuid}",
+         "date": fecha},
         [("files", nombre, contenido)])
     st, resp = cli.llamar("POST", "/api/mailbox/out", "post_out", datos=cuerpo, tipo=tipo,
                           timeout=p["http_timeout_s"])
@@ -160,7 +183,7 @@ def cmd_queue(a, cfg, rlog, cli):
     en_salida = st2 is not None and run_uuid in resp2.decode("utf-8", "replace")
     estado = {"run_uuid": run_uuid, "asunto": run_uuid, "adjunto": nombre, "bytes": a.size,
               "adjunto_sha256": sha, "origen": p["mycall"], "destino": p["peer_call"],
-              "codigo_post_out": st, "en_bandeja_salida": en_salida}
+              "fecha_usada": fecha, "codigo_post_out": st, "en_bandeja_salida": en_salida}
     ruta_estado = rlog.save_json("state.json", estado)
     # Se imprime la ruta completa: este archivo se copia al PC B para check-in.
     print(f"\nstate.json (copiar al PC B para check-in): {ruta_estado.resolve()}", flush=True)
@@ -175,7 +198,8 @@ def cmd_connect(a, cfg, rlog, cli):
                           datos=b"", timeout=p["connect_timeout_s"])
     # HTTP 200 NO prueba entrega; HTTP 500 = fallo de sesión.
     return {"paso": "connect", "url": url, "codigo_http": st,
-            "cuerpo": resp.decode("utf-8", "replace")[:5000],
+            "cuerpo_completo_en": cli.ultimo_body,
+            "cuerpo_truncado_5000": resp.decode("utf-8", "replace")[:5000],
             "sesion": "ok_http" if st == 200 else "fallo",
             "nota": "HTTP 200/NumReceived no prueba entrega; verificar en la bandeja de B"}
 
@@ -188,9 +212,14 @@ def cmd_checkin(a, cfg, rlog, cli):
     encontrados = buscar_mensajes(lista, est["run_uuid"])
     res = {"paso": "check-in", "run_uuid": est["run_uuid"], "codigo_http": st,
            "mensajes_en_entrada": len(lista), "mensajes_con_uuid": len(encontrados),
-           "adjuntos": [], "resultado": "fallo"}
+           "mids_con_uuid": mids(encontrados), "adjuntos": [], "resultado": "fallo"}
     if not encontrados:
         res["motivo"] = "el mensaje con ese UUID no aparece en la bandeja de entrada"
+        return res
+    if len(encontrados) > 1:
+        res["resultado"] = "no_determinado"
+        res["motivo"] = (f"hay {len(encontrados)} mensajes con el mismo UUID "
+                         f"(MID {res['mids_con_uuid']}); no se elige uno al azar")
         return res
     msg = encontrados[0]
     mid = getk(msg, "MID", "Mid", "id")
@@ -205,18 +234,24 @@ def cmd_checkin(a, cfg, rlog, cli):
         sha = sha256_bytes(contenido) if st_d == 200 else None
         if st_d == 200:
             (rlog.dir / f"recibido_{nombre}").write_bytes(contenido)
-        # Si la descarga falla, el cuerpo es un mensaje de error: no cuenta como contenido.
-        res["adjuntos"].append({"nombre": nombre, "codigo_http": st_d,
-                                "bytes": len(contenido) if st_d == 200 else 0,
-                                "error": None if st_d == 200 else contenido.decode("utf-8", "replace")[:300],
-                                "sha256": sha,
-                                "coincide_con_envio": sha == est["adjunto_sha256"]})
-    ok = any(x["coincide_con_envio"] for x in res["adjuntos"])
-    res["sha256_recibido"] = next((x["sha256"] for x in res["adjuntos"]
-                                   if x["coincide_con_envio"]), None)
+        tam_ok = st_d == 200 and len(contenido) == est["bytes"]
+        res["adjuntos"].append({
+            "nombre": nombre, "codigo_http": st_d,
+            "bytes": len(contenido) if st_d == 200 else 0,
+            "error": None if st_d == 200 else contenido.decode("utf-8", "replace")[:300],
+            "sha256": sha, "tamano_coincide": tam_ok,
+            "nombre_coincide": nombre == est["adjunto"],  # observación: Pat podría renombrar
+            # Criterio: hash Y tamaño. El nombre queda como observación.
+            "coincide_con_envio": sha == est["adjunto_sha256"] and tam_ok})
+    # Se espera exactamente UN adjunto, el que se envió.
+    ok = len(res["adjuntos"]) == 1 and res["adjuntos"][0]["coincide_con_envio"]
+    res["sha256_recibido"] = res["adjuntos"][0]["sha256"] if ok else None
     res["resultado"] = "aprobado" if ok else "fallo"
     if not ok:
-        res["motivo"] = "ningún adjunto recibido coincide con el SHA-256 del envío"
+        n = len(res["adjuntos"])
+        res["motivo"] = ("el adjunto recibido no coincide en tamaño o SHA-256 con el envío"
+                         if n == 1 else
+                         f"se esperaba exactamente un adjunto y llegaron {n}")
     return res
 
 
@@ -224,7 +259,7 @@ def cmd_ack_queue(a, cfg, rlog, cli):
     p = cfg["pat"]
     cuerpo, tipo = multipart(
         {"to": a.to, "subject": f"ACK run={a.uuid}",
-         "body": f"run={a.uuid}\nsha256={a.sha256}"}, [])
+         "body": f"run={a.uuid}\nsha256={a.sha256}", "date": fecha_rfc3339()}, [])
     st, _ = cli.llamar("POST", "/api/mailbox/out", "post_out_ack", datos=cuerpo, tipo=tipo,
                        timeout=p["http_timeout_s"])
     st2, resp2 = cli.llamar("GET", "/api/mailbox/out", "get_out", timeout=p["http_timeout_s"])
@@ -245,6 +280,10 @@ def cmd_ack_verify(a, cfg, rlog, cli):
     if not acks:
         res["motivo"] = "el ACK no llegó a la bandeja de entrada de A"
         return res
+    if len(acks) > 1:
+        res["resultado"] = "no_determinado"
+        res["motivo"] = f"hay {len(acks)} ACK con el mismo UUID (MID {mids(acks)})"
+        return res
     texto = json.dumps(acks[0], ensure_ascii=False)
     res["uuid_en_mensaje"] = est["run_uuid"] in texto
     res["sha256_completo_en_mensaje"] = est["adjunto_sha256"] in texto
@@ -261,7 +300,9 @@ def cmd_disconnect(a, cfg, rlog, cli):
     st, resp = cli.llamar("POST", "/api/disconnect", "post_disconnect", datos=b"",
                           timeout=cfg["pat"]["http_timeout_s"])
     return {"paso": "disconnect", "codigo_http": st,
-            "cuerpo": resp.decode("utf-8", "replace")[:2000]}
+            "resultado": "ok" if st == 200 else "fallo",
+            "cuerpo_completo_en": cli.ultimo_body,
+            "cuerpo_truncado_2000": resp.decode("utf-8", "replace")[:2000]}
 
 
 def main() -> int:
@@ -304,8 +345,7 @@ def main() -> int:
         rlog.log("fin", resultado=res.get("resultado"), json=str(ruta))
         rlog.close()
     print(f"\nResultado: {res.get('resultado', res.get('sesion'))}  ->  {ruta}")
-    return 0 if res.get("resultado") in ("ok", "aprobado") or res.get("sesion") == "ok_http" \
-        or a.subcomando == "disconnect" else 1
+    return 0 if res.get("resultado") in ("ok", "aprobado") or res.get("sesion") == "ok_http" else 1
 
 
 if __name__ == "__main__":

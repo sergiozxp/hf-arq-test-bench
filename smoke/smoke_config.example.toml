@@ -37,3 +37,11 @@ transport = "varahf"
 mercury_zip = ""
 mercury_exe = ""
 pat_exe = ""
+
+# Archivos que se copian a la carpeta de resultados (al inicio y al final) con su SHA-256.
+# Rutas de Windows entre comillas SIMPLES. Dejar "" para omitir.
+[registrar]
+mercury_ini = ""
+mercury_log = ""
+pat_config = ""
+pat_log = ""

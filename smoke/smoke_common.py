@@ -8,6 +8,11 @@ QUÉ HACE
     configurados, salida de `netstat -ano` y si los puertos están en escucha.
   - Ofrece una captura TCP con hilo lector que guarda los bytes crudos recibidos
     (y los enviados) con su marca de tiempo.
+  - Detecta puertos en escucha en `netstat` sin depender del idioma de Windows (LISTENING /
+    ESCUCHANDO), y guarda netstat, plan de energía y dispositivos de audio al inicio y
+    netstat al final. Copia con SHA-256 los archivos de la sección [registrar] del TOML.
+  - Guarda un índice de tiempos también de los bytes ENVIADOS, y expone el estado/error
+    de cada socket para distinguir cierre limpio, timeout y fallo de red.
   - Genera payloads deterministas (semilla fija, incompresibles) y la cabecera
     de aplicación de 16 bytes (longitud 8 B + SHA-256 truncado 8 B).
 
@@ -143,6 +148,69 @@ class RunLog:
             self._f.close()
 
 
+def puertos_en_escucha(salida: str, puertos) -> tuple[dict, dict]:
+    """Detecta puertos TCP en escucha SIN depender del idioma de Windows: el estado
+    se escribe LISTENING en inglés pero ESCUCHANDO en español, así que se reconoce por
+    la dirección remota vacía (0.0.0.0:0, [::]:0 o *:*) y no por la palabra del estado."""
+    escuchando, lineas = {}, {}
+    for p in puertos:
+        m = re.search(rf"^\s*TCP\s+\S+:{p}\s+(?:0\.0\.0\.0:0|\[::\]:0|\*:\*)\s+\S+.*$",
+                      salida, re.M | re.I)
+        escuchando[str(p)] = bool(m)
+        lineas[str(p)] = m.group(0).strip() if m else None
+    return escuchando, lineas
+
+
+def _ejecutar(comando: list[str], espera_s: int = 30) -> str:
+    try:
+        r = subprocess.run(comando, capture_output=True, text=True, errors="replace",
+                           timeout=espera_s)
+        return (r.stdout or "") + (("\nSTDERR: " + r.stderr) if r.stderr else "")
+    except Exception as e:  # noqa: BLE001 - se registra el error tal cual
+        return f"ERROR: {e!r}"
+
+
+def capturas_sistema() -> dict:
+    """Mejor esfuerzo: plan de energía y dispositivos de audio. Si falla, se registra el
+    error; el nivel de audio y las mejoras de Windows se anotan a mano en la planilla."""
+    return {
+        "plan_energia": _ejecutar(["powercfg", "/getactivescheme"]).strip(),
+        "audio_endpoints": _ejecutar(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-PnpDevice -Class AudioEndpoint -PresentOnly | "
+             "Select-Object FriendlyName,Status,InstanceId | ConvertTo-Json"]).strip(),
+    }
+
+
+def registrar_archivos(cfg: dict, rlog: RunLog, etapa: str) -> dict:
+    """Copia a results/.../registro/<etapa>/ los archivos de la sección [registrar]
+    (mercury.ini, configuración y logs de Pat y de Mercury) y guarda su SHA-256."""
+    salida = {}
+    destino = rlog.dir / "registro" / etapa
+    for nombre, ruta in cfg.get("registrar", {}).items():
+        if not ruta:
+            continue
+        try:
+            destino.mkdir(parents=True, exist_ok=True)
+            copia = destino / Path(ruta).name
+            shutil.copy(ruta, copia)
+            salida[nombre] = {"ruta": ruta, "sha256": sha256_file(copia)}
+        except OSError as e:
+            salida[nombre] = {"ruta": ruta, "error": repr(e)}
+    return salida
+
+
+def capture_final(cfg: dict, rlog: RunLog, puertos=()) -> dict:
+    """Estado al terminar: netstat final y de nuevo los archivos de [registrar]."""
+    salida = _ejecutar(["netstat", "-ano"])
+    (rlog.dir / "netstat_fin.txt").write_text(salida, encoding="utf-8")
+    esc, lin = puertos_en_escucha(salida, puertos)
+    fin = {"t_utc": utc_iso(), "escuchando": esc, "escuchando_lineas": lin,
+           "archivos_registrados_fin": registrar_archivos(cfg, rlog, "fin")}
+    rlog.save_json("environment_fin.json", fin)
+    return fin
+
+
 def capture_environment(cfg: dict, rlog: RunLog, puertos=()) -> dict:
     env = {
         "t_utc": utc_iso(),
@@ -166,9 +234,9 @@ def capture_environment(cfg: dict, rlog: RunLog, puertos=()) -> dict:
     except Exception as e:  # noqa: BLE001 - se registra el error tal cual
         salida = f"ERROR: {e!r}"
     (rlog.dir / "netstat_inicio.txt").write_text(salida, encoding="utf-8")
-    env["escuchando"] = {
-        str(p): bool(re.search(rf":{p}\s+\S+\s+LISTEN", salida)) for p in puertos
-    }
+    env["escuchando"], env["escuchando_lineas"] = puertos_en_escucha(salida, puertos)
+    env.update(capturas_sistema())
+    env["archivos_registrados_inicio"] = registrar_archivos(cfg, rlog, "inicio")
     rlog.save_json("environment.json", env)
     rlog.log("entorno", escuchando=env["escuchando"], binarios=env["binarios"])
     return env
@@ -195,6 +263,8 @@ class TcpCapture:
         self._rx = open(rlog.dir / f"raw_rx_{nombre}.bin", "wb")
         self._tx = open(rlog.dir / f"raw_tx_{nombre}.bin", "wb")
         self._idx = open(rlog.dir / f"raw_rx_{nombre}.idx.jsonl", "w", encoding="utf-8")
+        self._txidx = open(rlog.dir / f"raw_tx_{nombre}.idx.jsonl", "w", encoding="utf-8")
+        self._tx_off = 0
         self.sock = socket.create_connection((host, puerto), timeout=10)
         self.sock.settimeout(0.5)
         self._stop = threading.Event()
@@ -243,9 +313,17 @@ class TcpCapture:
 
     # --- envío
     def send(self, datos: bytes, etiqueta: str = "") -> None:
+        t0, u0 = mono_ns(), utc_iso()
         self.sock.sendall(datos)
+        t1 = mono_ns()
         self._tx.write(datos)
         self._tx.flush()
+        # Un registro por envío: instante antes y después de sendall, posición y longitud.
+        self._txidx.write(json.dumps({"t_mono_ns": t0, "t_fin_ns": t1, "t_utc": u0,
+                                      "offset": self._tx_off, "n": len(datos),
+                                      "etiqueta": etiqueta}) + "\n")
+        self._txidx.flush()
+        self._tx_off += len(datos)
         self.rlog.log("tx", socket=self.nombre, etiqueta=etiqueta, bytes=len(datos))
 
     def nlines(self) -> int:
@@ -280,6 +358,25 @@ class TcpCapture:
                     return None
                 self.cond.wait(timeout=resto)
 
+    def estado(self) -> dict:
+        """Cierre limpio, cierre con error del socket, o abierto (para result.json)."""
+        with self.cond:
+            return {"cerrado": self.closed, "error_socket": self.error,
+                    "bytes_recibidos": sum(n for _, n in self.chunks)}
+
+    def wait_line_after(self, patron: str, timeout_s: float, start: int, t_min_ns: int):
+        """Como wait_line, pero solo acepta una línea cuya marca monotónica sea
+        ESTRICTAMENTE posterior a t_min_ns (descarta eventos viejos que el hilo lector
+        procesó tarde)."""
+        limite = time.monotonic() + timeout_s
+        while True:
+            r = self.wait_line(patron, max(0.0, limite - time.monotonic()), start=start)
+            if r is None:
+                return None
+            if r[1][0] > t_min_ns:
+                return r
+            start = r[0] + 1
+
     def read_exact(self, n: int, idle_s: float) -> bytes:
         """Lee exactamente n bytes. El plazo se renueva con cada byte nuevo
         (60 s sin bytes nuevos = timeout, como en E0-1)."""
@@ -288,7 +385,8 @@ class TcpCapture:
             ultimo = len(self.buf)
             while len(self.buf) < n:
                 if self.closed:
-                    raise ConnectionError("socket cerrado antes de completar la lectura")
+                    raise ConnectionError("socket cerrado antes de completar la lectura "
+                                          f"(error del hilo lector: {self.error})")
                 resto = limite - time.monotonic()
                 if resto <= 0:
                     raise TimeoutError(f"{idle_s} s sin bytes nuevos "
@@ -312,5 +410,5 @@ class TcpCapture:
             self.sock.close()
         except OSError:
             pass
-        for f in (self._rx, self._tx, self._idx):
+        for f in (self._rx, self._tx, self._idx, self._txidx):
             f.close()
