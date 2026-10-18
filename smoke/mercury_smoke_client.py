@@ -95,6 +95,16 @@ def solo_digitos(t: str) -> str:
     return re.sub(r"\D", "", t)
 
 
+def hubo_buffer_positivo(lineas_ns, t_w0: int, t_cero_ns: int | None) -> bool:
+    """¿Hubo una línea BUFFER > 0 posterior a la escritura y no posterior al BUFFER 0 aceptado?
+    Se comparan marcas monotónicas ENTERAS en ns (sin pasar por segundos en coma flotante)."""
+    for t, txt in lineas_ns:
+        m = re.search(RX_BUFFER, txt)
+        if m and int(m.group(1)) > 0 and t > t_w0 and (t_cero_ns is None or t <= t_cero_ns):
+            return True
+    return False
+
+
 def hay_error(lineas, patrones) -> bool:
     return any(re.search(p, l, re.I) for p in patrones for l in lineas)
 
@@ -221,15 +231,13 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                 b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", m["transfer_timeout_s"],
                                          start=idx_w, t_min_ns=t_w0)
                 with cmd.cond:
-                    buffers = [(segundos(t_w0, t), txt) for t, txt in cmd.lines[idx_w:]
-                               if re.search(RX_BUFFER, txt)]
-                res["lineas_buffer"] = buffers
-                t_cero = segundos(t_w0, b0[1][0]) if b0 else None
+                    buffers_ns = [(t, txt) for t, txt in cmd.lines[idx_w:]
+                                  if re.search(RX_BUFFER, txt)]
+                res["lineas_buffer"] = [(segundos(t_w0, t), txt) for t, txt in buffers_ns]
                 # Observación (no criterio): si Mercury informa BUFFER > 0 tras escribir, el
                 # BUFFER 0 posterior es una transición real y no un valor viejo retrasado.
-                res["buffer_positivo_antes_de_cero"] = any(
-                    int(re.search(RX_BUFFER, txt).group(1)) > 0 and (t_cero is None or t <= t_cero)
-                    for t, txt in buffers)
+                res["buffer_positivo_antes_de_cero"] = hubo_buffer_positivo(
+                    buffers_ns, t_w0, b0[1][0] if b0 else None)
                 if b0 is None:
                     fallos.append("no se vio BUFFER 0 posterior al envío (timeout o cierre)")
                 else:

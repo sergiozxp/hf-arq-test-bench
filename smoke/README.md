@@ -32,7 +32,8 @@ El QUÉ HACE / QUÉ NO HACE / POR QUÉ está al inicio de cada script.
 - Pat 1.0.0 (`api/mailbox.go`, `postOutboundMessageHandler`): exige exactamente un campo
   `date`, lo lee con `time.RFC3339` y su falta da HTTP 400; el asunto se toma de `subject` y
   los adjuntos de `files`. Los nombres `MID`, `Subject`, `Files`, `Name`, `Body` fueron
-  confirmados por una revisión externa.
+  confirmados por una revisión externa en el código fuente de Pat; que una ejecución real con
+  `varahf` los entregue sin transformaciones sigue pendiente de probar.
 
 ## NO probado con Mercury ni Pat reales
 - Que el binario de Windows produzca exactamente las líneas documentadas (incluido el SSID
@@ -41,6 +42,8 @@ El QUÉ HACE / QUÉ NO HACE / POR QUÉ está al inicio de cada script.
 - Que Mercury acepte o rechace `BW` tras `CONNECTED` (variante V2).
 - La secuencia real de `BUFFER` (si informa valores positivos antes de 0); se anota como
   observación en `buffer_positivo_antes_de_cero`.
+- Que un `DISCONNECT` de limpieza con respuesta `WRONG` sea siempre benigno (sesión ya terminada):
+  se registra en `desconexion_limpieza` y se juzga el estado final, no la respuesta.
 - Que `DISCONNECT` justo tras `BUFFER 0` no corte nada en B (a observar en E0-1).
 - Que Pat conserve asunto y adjuntos durante la transferencia real.
 - Que los logs de Mercury y Pat se puedan copiar con los programas abiertos (si no, la
