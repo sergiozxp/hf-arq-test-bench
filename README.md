@@ -27,3 +27,10 @@ simuladores de la lógica. No se presentan resultados.
 ## Licencia
 Código: MIT (ver `LICENSE`). Documentos y datos: licencia por decidir antes de hacer
 público el repositorio.
+
+## Descarga para Windows (sin instalar Python)
+
+`HF-ARQ-Smoke.exe` se compila en GitHub Actions y se publica en *Releases* con su SHA-256.
+Guía de uso para el operador: [docs/guia_operador_windows.md](docs/guia_operador_windows.md).
+Las pruebas del lanzador usan Mercury y Pat **simulados** (`tests/`); no sustituyen a las
+pruebas E0 con los programas reales.

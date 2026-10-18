@@ -6,3 +6,8 @@ smoke_config.toml
 # Binarios de terceros: no se versionan (se registran por SHA-256)
 *.zip
 *.exe
+build/
+dist/
+*.spec
+HF-ARQ-Smoke-datos/
+smoke_gui_ajustes.json

@@ -1,0 +1,75 @@
+# Compila HF-ARQ-Smoke.exe en Windows, lo prueba y (solo con una etiqueta v*) lo publica en Releases.
+#
+# QUÉ HACE
+#   - Ejecuta las pruebas de la lógica y del camino del botón EJECUTAR (con Mercury SIMULADO).
+#   - Empaqueta smoke/smoke_gui.py con PyInstaller en un único .exe sin consola.
+#   - Prueba el .exe ya empaquetado con un envío/recepción completos contra el Mercury simulado.
+#   - Calcula su SHA-256 y, si la ejecución viene de una etiqueta v*, lo adjunta a una Release.
+# QUÉ NO HACE
+#   - No prueba Mercury, Pat ni radio. No firma el .exe (Windows puede mostrar un aviso).
+#   - El .exe no es reproducible bit a bit: se identifica por el SHA-256 publicado con cada Release.
+name: Construir HF-ARQ-Smoke.exe
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths: ["smoke/**", "tests/**", ".github/workflows/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  construir:
+    runs-on: windows-latest
+    permissions:
+      contents: write          # solo para adjuntar el .exe a la Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # shell: bash corta en el primer comando que falla (pwsh solo mira el último).
+      - name: Pruebas de la lógica y del botón EJECUTAR (Mercury simulado)
+        shell: bash
+        run: |
+          set -e
+          python tests/test_logica.py
+          python tests/prueba_ventana_simulada.py
+          python tests/prueba_lanzador.py --launcher "python smoke/smoke_gui.py"
+
+      - name: Empaquetar con PyInstaller
+        shell: bash
+        run: |
+          set -e
+          python -m pip install pyinstaller==6.11.1
+          pyinstaller --noconfirm --onefile --windowed --name HF-ARQ-Smoke --paths smoke smoke/smoke_gui.py
+
+      - name: SHA-256 del .exe
+        run: |
+          $h = (Get-FileHash dist\HF-ARQ-Smoke.exe -Algorithm SHA256).Hash.ToLower()
+          "$h  HF-ARQ-Smoke.exe" | Out-File -Encoding ascii dist\HF-ARQ-Smoke.exe.sha256
+          Get-Content dist\HF-ARQ-Smoke.exe.sha256
+
+      # Se sube aunque fallen las pruebas del .exe, para poder inspeccionarlo (no es una versión aprobada).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HF-ARQ-Smoke-exe
+          path: |
+            dist/HF-ARQ-Smoke.exe
+            dist/HF-ARQ-Smoke.exe.sha256
+
+      - name: Probar el .exe empaquetado (Mercury simulado)
+        run: python tests/prueba_lanzador.py --launcher "dist/HF-ARQ-Smoke.exe"
+
+      - name: Publicar Release (solo etiquetas v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" dist\HF-ARQ-Smoke.exe dist\HF-ARQ-Smoke.exe.sha256 `
+            --title "HF-ARQ-Smoke $env:GITHUB_REF_NAME" `
+            --notes "Lanzador de pruebas smoke (Mercury + Pat). Superó las pruebas con Mercury y Pat SIMULADOS; no se ha probado con Mercury ni Pat reales. Compare el SHA-256 de la descarga con el archivo .sha256."
