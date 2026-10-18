@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+# Resultados de corridas y configuración local de cada PC
+results/
+smoke_config.toml
+# Binarios de terceros: no se versionan (se registran por SHA-256)
+*.zip
+*.exe
