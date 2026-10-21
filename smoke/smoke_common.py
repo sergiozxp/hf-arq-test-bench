@@ -1,36 +1,8 @@
-"""smoke_common.py - utilidades compartidas por los scripts del smoke test.
+"""Shared support for the MS-1.0 modem smoke scripts.
 
-QUÉ HACE
-  - Carga la configuración desde un archivo TOML y registra su SHA-256.
-  - Crea una carpeta por corrida (results/<fase>/<run_id>/) con un registro
-    de eventos (events.jsonl) con doble marca de tiempo (UTC y reloj monotónico).
-  - Captura el entorno: versión de Windows y de Python, SHA-256 de los binarios
-    configurados, salida de `netstat -ano` y si los puertos están en escucha.
-  - Ofrece una captura TCP con hilo lector que guarda los bytes crudos recibidos
-    (y los enviados) con su marca de tiempo.
-  - Detecta puertos en escucha en `netstat` sin depender del idioma de Windows (LISTENING /
-    ESCUCHANDO), y guarda netstat, plan de energía y dispositivos de audio al inicio y
-    netstat al final. Copia con SHA-256 los archivos de la sección [registrar] del TOML.
-  - Guarda un índice de tiempos también de los bytes ENVIADOS, y expone el estado/error
-    de cada socket para distinguir cierre limpio, timeout y fallo de red.
-  - Genera payloads deterministas (semilla fija, incompresibles) y la cabecera
-    de aplicación de 16 bytes (longitud 8 B + SHA-256 truncado 8 B).
-
-QUÉ NO HACE
-  - No contiene lógica de prueba ni decide si un ensayo aprobó. Eso lo hace cada
-    script, con los criterios del smoke test v6.
-  - No modifica Mercury ni Pat, ni ningún archivo fuera de la carpeta de resultados.
-  - No reintenta nada por su cuenta.
-  - No interpreta el formato de las respuestas de Mercury: las guarda tal cual.
-
-POR QUÉ
-  - Una sola implementación del registro y de la cabecera evita que E0, H1 y H2
-    midan con reglas distintas (requisito de reproducibilidad del banco v4).
-  - Se guardan bytes crudos porque el formato exacto de respuestas y eventos aún
-    está pendiente de confirmar en E0-2; no se debe perder evidencia por
-    interpretarla de antemano.
-  - El payload es determinista e incompresible para que el resultado no dependa
-    de ninguna compresión de la aplicación.
+The module loads TOML configuration, creates one evidence directory per run,
+captures environment metadata and raw TCP traffic, and creates deterministic
+framed payloads. It never changes modem configuration or retries a test.
 """
 from __future__ import annotations
 
@@ -58,8 +30,7 @@ except ImportError:  # pragma: no cover
 
 HEADER_LEN = 16
 
-# En Windows la consola puede no ser UTF-8: un carácter inesperado en una línea
-# recibida no debe interrumpir el hilo lector ni la prueba.
+# A non-UTF-8 console must not interrupt the reader thread.
 for _flujo in (sys.stdout, sys.stderr):
     try:
         _flujo.reconfigure(errors="replace")
@@ -67,13 +38,13 @@ for _flujo in (sys.stdout, sys.stderr):
         pass
 
 
-# ---------------------------------------------------------------- tiempo y hash
+# ---------------------------------------------------------------- time and hashes
 def utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def mono_ns() -> int:
-    # time.perf_counter_ns usa QueryPerformanceCounter en Windows.
+    # Python uses QueryPerformanceCounter on Windows.
     return time.perf_counter_ns()
 
 
@@ -89,7 +60,7 @@ def sha256_file(path: str | Path) -> str:
     return h.hexdigest()
 
 
-# ------------------------------------------------------------------ configuración
+# ---------------------------------------------------------------- configuration
 def load_config(path: str) -> dict:
     p = Path(path)
     raw = p.read_bytes()
@@ -101,13 +72,12 @@ def load_config(path: str) -> dict:
 
 # ------------------------------------------------------ payload y cabecera
 def make_payload(size: int, seed: int) -> bytes:
-    """Bytes deterministas e incompresibles (misma semilla, mismo archivo)."""
+    """Return deterministic high-entropy bytes for a fixed seed."""
     return random.Random(seed).randbytes(size)
 
 
 def make_header(payload: bytes) -> bytes:
-    """Cabecera de aplicación (nuestra, no de Mercury): longitud (8 B, big-endian)
-    seguida de los primeros 8 bytes del SHA-256 del payload."""
+    """Build the common frame header: length plus truncated SHA-256."""
     return struct.pack(">Q", len(payload)) + hashlib.sha256(payload).digest()[:8]
 
 
@@ -115,7 +85,7 @@ def parse_header(h: bytes) -> tuple[int, bytes]:
     return struct.unpack(">Q", h[:8])[0], h[8:16]
 
 
-# --------------------------------------------------------------- registro de corrida
+# ---------------------------------------------------------------- run evidence
 class RunLog:
     def __init__(self, cfg: dict, phase: str, tag: str):
         ahora = datetime.now(timezone.utc)
@@ -125,21 +95,21 @@ class RunLog:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._f = open(self.dir / "events.jsonl", "a", encoding="utf-8")
-        # Copia de la configuración usada, con su hash.
-        shutil.copy(cfg["_config_path"], self.dir / "config_usada.toml")
-        self.log("inicio", run_id=self.run_id, config_sha256=cfg["_config_sha256"])
+        # Preserve the configuration copy that produced this run.
+        shutil.copy(cfg["_config_path"], self.dir / "config_used.toml")
+        self.log("start", run_id=self.run_id, config_sha256=cfg["_config_sha256"])
 
-    def log(self, tipo: str, **datos) -> None:
-        rec = {"t_utc": utc_iso(), "t_mono_ns": mono_ns(), "tipo": tipo, **datos}
-        linea = json.dumps(rec, ensure_ascii=False, default=str)
+    def log(self, event: str, **data) -> None:
+        rec = {"t_utc": utc_iso(), "t_mono_ns": mono_ns(), "event": event, **data}
+        line = json.dumps(rec, ensure_ascii=False, default=str)
         with self._lock:
-            self._f.write(linea + "\n")
+            self._f.write(line + "\n")
             self._f.flush()
-        resumen = json.dumps(datos, ensure_ascii=False, default=str)
-        print(f"[{rec['t_utc'][11:19]}] {tipo} {resumen[:220]}", flush=True)
+        summary = json.dumps(data, ensure_ascii=False, default=str)
+        print(f"[{rec['t_utc'][11:19]}] {event} {summary[:220]}", flush=True)
 
-    def save_json(self, nombre: str, obj) -> Path:
-        p = self.dir / nombre
+    def save_json(self, name: str, obj) -> Path:
+        p = self.dir / name
         p.write_text(json.dumps(obj, ensure_ascii=False, indent=2, default=str),
                      encoding="utf-8")
         return p
@@ -149,20 +119,18 @@ class RunLog:
             self._f.close()
 
 
-def puertos_en_escucha(salida: str, puertos) -> tuple[dict, dict]:
-    """Detecta puertos TCP en escucha SIN depender del idioma de Windows: el estado
-    se escribe LISTENING en inglés pero ESCUCHANDO en español, así que se reconoce por
-    la dirección remota vacía (0.0.0.0:0, [::]:0 o *:*) y no por la palabra del estado."""
-    escuchando, lineas = {}, {}
+def ports_listening(salida: str, puertos) -> tuple[dict, dict]:
+    """Detect listening TCP ports without depending on localized state text."""
+    listening, lineas = {}, {}
     for p in puertos:
         m = re.search(rf"^\s*TCP\s+\S+:{p}\s+(?:0\.0\.0\.0:0|\[::\]:0|\*:\*)\s+\S+.*$",
                       salida, re.M | re.I)
-        escuchando[str(p)] = bool(m)
+        listening[str(p)] = bool(m)
         lineas[str(p)] = m.group(0).strip() if m else None
-    return escuchando, lineas
+    return listening, lineas
 
 
-def _ejecutar(comando: list[str], espera_s: int = 30) -> str:
+def _run_command(comando: list[str], espera_s: int = 30) -> str:
     try:
         r = subprocess.run(comando, capture_output=True, text=True, errors="replace",
                            timeout=espera_s)
@@ -171,33 +139,31 @@ def _ejecutar(comando: list[str], espera_s: int = 30) -> str:
         return f"ERROR: {e!r}"
 
 
-def capturas_sistema() -> dict:
-    """Mejor esfuerzo: plan de energía y dispositivos de audio. Si falla, se registra el
-    error; el nivel de audio y las mejoras de Windows se anotan a mano en la planilla."""
+def capture_system() -> dict:
+    """Collect best-effort power-plan and audio-endpoint metadata."""
     return {
-        "plan_energia": _ejecutar(["powercfg", "/getactivescheme"]).strip(),
-        "audio_endpoints": _ejecutar(
+        "power_plan": _run_command(["powercfg", "/getactivescheme"]).strip(),
+        "audio_endpoints": _run_command(
             ["powershell", "-NoProfile", "-Command",
              "Get-PnpDevice -Class AudioEndpoint -PresentOnly | "
              "Select-Object FriendlyName,Status,InstanceId | ConvertTo-Json"]).strip(),
     }
 
 
-def registrar_archivos(cfg: dict, rlog: RunLog, etapa: str) -> dict:
-    """Copia a results/.../registro/<etapa>/ los archivos de la sección [registrar]
-    (mercury.ini, configuración y logs de Pat y de Mercury) y guarda su SHA-256."""
+def archive_evidence_files(cfg: dict, rlog: RunLog, etapa: str) -> dict:
+    """Copy configured evidence files and return hashes and source metadata."""
     salida = {}
-    destino = rlog.dir / "registro" / etapa
-    for nombre, ruta in cfg.get("registrar", {}).items():
+    destino = rlog.dir / "evidence" / etapa
+    for nombre, ruta in cfg.get("evidence", {}).items():
         if not ruta:
             continue
         try:
             destino.mkdir(parents=True, exist_ok=True)
-            # La clave va en el nombre: dos archivos distintos con el mismo nombre no se pisan.
+            # Prefix with the config key so equal basenames cannot collide.
             copia = destino / f"{nombre}__{Path(ruta).name}"
             origen = os.stat(ruta)
             shutil.copy(ruta, copia)
-            # Un log vivo es una INSTANTÁNEA: se anotan tamaño y fecha del origen al copiar.
+            # A live log is a snapshot; preserve its size and mtime when copied.
             salida[nombre] = {"ruta": ruta, "sha256": sha256_file(copia),
                               "bytes_origen": origen.st_size, "mtime_origen": origen.st_mtime,
                               "bytes_copia": copia.stat().st_size}
@@ -206,98 +172,90 @@ def registrar_archivos(cfg: dict, rlog: RunLog, etapa: str) -> dict:
     return salida
 
 
-def problemas_de_evidencia(cfg: dict, env: dict, fin: dict) -> dict:
-    """Separa lo que invalida la evidencia de lo que solo es una advertencia.
-    - evidencia_incompleta: un archivo de [registrar] SÍ configurado no se pudo copiar
-      (v6 exige guardar mercury.ini, configuración y logs con su SHA-256).
-    - advertencias: [registrar] sin ningún archivo, o fallo de powercfg/audio (mejor esfuerzo)."""
+def evidence_issues(cfg: dict, env: dict, end: dict) -> dict:
+    """Separate missing configured evidence from best-effort system warnings."""
     incompleta, adv = [], []
-    for reg in (env.get("archivos_registrados_inicio", {}), fin.get("archivos_registrados_fin", {})):
+    for reg in (env.get("evidence_files_start", {}), end.get("evidence_files_end", {})):
         for nombre, d in reg.items():
             if isinstance(d, dict) and "error" in d:
                 incompleta.append(f"{nombre}: {d['error']}")
-    if not any(cfg.get("registrar", {}).values()):
-        adv.append("[registrar] vacío: no se registraron mercury.ini, configuración de Pat ni "
-                   "logs (v6 los exige para el criterio formal)")
-    for k in ("plan_energia", "audio_endpoints"):
+    if not any(cfg.get("evidence", {}).values()):
+        adv.append("[evidence] is empty; no Mercury configuration or log was archived")
+    for k in ("power_plan", "audio_endpoints"):
         if str(env.get(k, "")).startswith("ERROR") or not str(env.get(k, "")).strip():
-            adv.append(f"{k}: no se pudo obtener ({str(env.get(k, ''))[:80]})")
-    return {"evidencia_incompleta": list(dict.fromkeys(incompleta)), "advertencias": adv}
+            adv.append(f"{k}: could not be collected ({str(env.get(k, ''))[:80]})")
+    return {"incomplete_evidence": list(dict.fromkeys(incompleta)), "warnings": adv}
 
 
 def capture_final(cfg: dict, rlog: RunLog, puertos=()) -> dict:
-    """Estado al terminar: netstat final y de nuevo los archivos de [registrar]."""
-    salida = _ejecutar(["netstat", "-ano"])
-    (rlog.dir / "netstat_fin.txt").write_text(salida, encoding="utf-8")
-    esc, lin = puertos_en_escucha(salida, puertos)
-    fin = {"t_utc": utc_iso(), "escuchando": esc, "escuchando_lineas": lin,
-           "archivos_registrados_fin": registrar_archivos(cfg, rlog, "fin")}
-    rlog.save_json("environment_fin.json", fin)
-    return fin
+    """Capture final netstat output and a second evidence snapshot."""
+    salida = _run_command(["netstat", "-ano"])
+    (rlog.dir / "netstat_end.txt").write_text(salida, encoding="utf-8")
+    esc, lin = ports_listening(salida, puertos)
+    end = {"t_utc": utc_iso(), "listening": esc, "listening_lines": lin,
+           "evidence_files_end": archive_evidence_files(cfg, rlog, "end")}
+    rlog.save_json("environment_end.json", end)
+    return end
 
 
 def capture_environment(cfg: dict, rlog: RunLog, puertos=()) -> dict:
     env = {
         "t_utc": utc_iso(),
         "windows": platform.platform(),
-        "version_windows": platform.version(),
+        "windows_version": platform.version(),
         "python": sys.version,
-        "config_ruta": cfg["_config_path"],
+        "config_path": cfg["_config_path"],
         "config_sha256": cfg["_config_sha256"],
-        "binarios": {},
+        "binaries": {},
     }
     for nombre, ruta in cfg.get("binaries", {}).items():
         if not ruta:
             continue
         try:
-            env["binarios"][nombre] = {"ruta": ruta, "sha256": sha256_file(ruta)}
+            env["binaries"][nombre] = {"ruta": ruta, "sha256": sha256_file(ruta)}
         except OSError as e:
-            env["binarios"][nombre] = {"ruta": ruta, "error": repr(e)}
+            env["binaries"][nombre] = {"ruta": ruta, "error": repr(e)}
     try:
         salida = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
                                 errors="replace", timeout=30).stdout
     except Exception as e:  # noqa: BLE001 - se registra el error tal cual
         salida = f"ERROR: {e!r}"
-    (rlog.dir / "netstat_inicio.txt").write_text(salida, encoding="utf-8")
-    env["escuchando"], env["escuchando_lineas"] = puertos_en_escucha(salida, puertos)
-    env.update(capturas_sistema())
-    env["archivos_registrados_inicio"] = registrar_archivos(cfg, rlog, "inicio")
+    (rlog.dir / "netstat_start.txt").write_text(salida, encoding="utf-8")
+    env["listening"], env["listening_lines"] = ports_listening(salida, puertos)
+    env.update(capture_system())
+    env["evidence_files_start"] = archive_evidence_files(cfg, rlog, "start")
     rlog.save_json("environment.json", env)
-    rlog.log("entorno", escuchando=env["escuchando"], binarios=env["binarios"])
+    rlog.log("environment", listening=env["listening"], binaries=env["binaries"])
     return env
 
 
-# ------------------------------------------------------------------ captura TCP
+# ------------------------------------------------------------------ TCP capture
 class TcpCapture:
-    """Conexión TCP con hilo lector. Guarda bytes crudos y su índice de tiempos.
+    """TCP connection with a reader thread and timestamped raw-byte captures."""
 
-    line_mode=True  -> separa líneas (terminadas en \\r o \\n): socket de comandos.
-    line_mode=False -> acumula bytes en un búfer: socket de datos.
-    """
-
-    def __init__(self, nombre: str, host: str, puerto: int, rlog: RunLog,
+    def __init__(self, name: str, host: str, port: int, rlog: RunLog,
                  line_mode: bool):
-        self.nombre, self.rlog, self.line_mode = nombre, rlog, line_mode
+        self.name, self.rlog, self.line_mode = name, rlog, line_mode
         self.cond = threading.Condition()
         self.buf = bytearray()
         self.lines: list[tuple[int, str]] = []
-        self.chunks: list[tuple[int, int]] = []  # (t_mono_ns, n_bytes) por recv
+        self.chunks: list[tuple[int, int]] = []  # (t_mono_ns, received_bytes)
         self.closed = False
         self.error: str | None = None
         self._linebuf = bytearray()
-        self._rx = open(rlog.dir / f"raw_rx_{nombre}.bin", "wb")
-        self._tx = open(rlog.dir / f"raw_tx_{nombre}.bin", "wb")
-        self._idx = open(rlog.dir / f"raw_rx_{nombre}.idx.jsonl", "w", encoding="utf-8")
-        self._txidx = open(rlog.dir / f"raw_tx_{nombre}.idx.jsonl", "w", encoding="utf-8")
+        self._rx = open(rlog.dir / f"raw_rx_{name}.bin", "wb")
+        self._tx = open(rlog.dir / f"raw_tx_{name}.bin", "wb")
+        self._idx = open(rlog.dir / f"raw_rx_{name}.idx.jsonl", "w", encoding="utf-8")
+        self._txidx = open(rlog.dir / f"raw_tx_{name}.idx.jsonl", "w", encoding="utf-8")
         self._tx_off = 0
-        self.sock = socket.create_connection((host, puerto), timeout=10)
+        self.sock = socket.create_connection((host, port), timeout=10)
         self.sock.settimeout(0.5)
         self._stop = threading.Event()
         self._hilo = threading.Thread(target=self._bucle, daemon=True)
         self._hilo.start()
-        rlog.log("socket_abierto", socket=nombre, host=host, puerto=puerto)
+        rlog.log("socket_open", socket=name, host=host, port=port)
 
-    # --- lectura
+    # --- receive
     def _bucle(self) -> None:
         while not self._stop.is_set():
             try:
@@ -334,41 +292,39 @@ class TcpCapture:
             if p:
                 texto = p.decode("utf-8", "replace")
                 self.lines.append((t, texto))
-                self.rlog.log("linea_rx", socket=self.nombre, texto=texto)
+                self.rlog.log("line_received", socket=self.name, text=texto)
 
-    # --- envío
-    def send(self, datos: bytes, etiqueta: str = "") -> None:
+    # --- send
+    def send(self, data: bytes, label: str = "") -> None:
         t0, u0 = mono_ns(), utc_iso()
-        self.sock.sendall(datos)
+        self.sock.sendall(data)
         t1 = mono_ns()
-        self._tx.write(datos)
+        self._tx.write(data)
         self._tx.flush()
-        # Un registro por envío: instante antes y después de sendall, posición y longitud.
+        # Index each sendall call with timestamps, stream offset, and byte count.
         self._txidx.write(json.dumps({"t_mono_ns": t0, "t_fin_ns": t1, "t_utc": u0,
-                                      "offset": self._tx_off, "n": len(datos),
-                                      "etiqueta": etiqueta}) + "\n")
+                                      "offset": self._tx_off, "n": len(data),
+                                      "label": label}) + "\n")
         self._txidx.flush()
-        self._tx_off += len(datos)
-        self.rlog.log("tx", socket=self.nombre, etiqueta=etiqueta, bytes=len(datos))
+        self._tx_off += len(data)
+        self.rlog.log("tx", socket=self.name, label=label, bytes=len(data))
 
     def nlines(self) -> int:
         with self.cond:
             return len(self.lines)
 
     def command(self, texto: str, ventana_s: float) -> list[str]:
-        """Envía un comando (terminado en \\r) y devuelve las líneas recibidas en la
-        ventana. Los eventos asíncronos que caigan en la ventana también se listan."""
-        inicio = self.nlines()
-        self.send(texto.encode("ascii") + b"\r", etiqueta=texto)
+        """Send one CR-terminated command and return lines in its observation window."""
+        start = self.nlines()
+        self.send(texto.encode("ascii") + b"\r", label=texto)
         time.sleep(ventana_s)
         with self.cond:
-            resp = [l[1] for l in self.lines[inicio:]]
-        self.rlog.log("respuesta_comando", comando=texto, lineas=resp)
+            resp = [l[1] for l in self.lines[start:]]
+        self.rlog.log("command_response", command=texto, lines=resp)
         return resp
 
     def wait_line(self, patron: str, timeout_s: float, start: int = 0):
-        """Espera una línea que cumpla la expresión regular. Devuelve
-        (indice, (t_mono_ns, texto)) o None si vence el tiempo o se cierra el socket."""
+        """Wait for a matching line, or return None on timeout or close."""
         rx = re.compile(patron)
         limite = time.monotonic() + timeout_s
         revisadas = start
@@ -383,16 +339,14 @@ class TcpCapture:
                     return None
                 self.cond.wait(timeout=resto)
 
-    def estado(self) -> dict:
-        """Cierre limpio, cierre con error del socket, o abierto (para result.json)."""
+    def state(self) -> dict:
+        """Return socket close and error state for result.json."""
         with self.cond:
-            return {"cerrado": self.closed, "error_socket": self.error,
-                    "bytes_recibidos": sum(n for _, n in self.chunks)}
+            return {"closed": self.closed, "socket_error": self.error,
+                    "received_bytes": sum(n for _, n in self.chunks)}
 
     def wait_line_after(self, patron: str, timeout_s: float, start: int, t_min_ns: int):
-        """Como wait_line, pero solo acepta una línea cuya marca monotónica sea
-        ESTRICTAMENTE posterior a t_min_ns (descarta eventos viejos que el hilo lector
-        procesó tarde)."""
+        """Like wait_line, but accept only a line after the supplied timestamp."""
         limite = time.monotonic() + timeout_s
         while True:
             r = self.wait_line(patron, max(0.0, limite - time.monotonic()), start=start)
@@ -403,8 +357,7 @@ class TcpCapture:
             start = r[0] + 1
 
     def read_exact(self, n: int, idle_s: float) -> bytes:
-        """Lee exactamente n bytes. El plazo se renueva con cada byte nuevo
-        (60 s sin bytes nuevos = timeout, como en E0-1)."""
+        """Read exactly n bytes and reset the idle timer after every new byte."""
         limite = time.monotonic() + idle_s
         with self.cond:
             ultimo = len(self.buf)
@@ -437,3 +390,4 @@ class TcpCapture:
             pass
         for f in (self._rx, self._tx, self._idx, self._txidx):
             f.close()
+
