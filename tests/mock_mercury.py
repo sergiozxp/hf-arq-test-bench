@@ -1,55 +1,78 @@
-"""Mercury SIMULADO solo para probar la lógica de los scripts (no es Mercury).
-Semántica tomada de la descripción de docs/TNC.md: comandos con \\r, datos sin framing,
-eventos CONNECTED / DISCONNECTED / BUFFER. Modo extra: 'extra' envía bytes sobrantes."""
-import socket, sys, threading, time
+"""A two-endpoint Mercury simulator for automated tests; it is not Mercury."""
+from __future__ import annotations
 
-MODO = sys.argv[1] if len(sys.argv) > 1 else "ok"
-estado = {"A": {}, "B": {}}
+import socket
+import sys
+import threading
+import time
 
-def inst(nombre, otro, cport, dport):
-    ls = []
-    for p in (cport, dport):
-        s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("127.0.0.1", p)); s.listen(1); ls.append(s)
-    def atender():
-        cs, _ = ls[0].accept(); ds, _ = ls[1].accept()
-        estado[nombre].update(cs=cs, ds=ds)
-        def datos():
+MODE = sys.argv[1] if len(sys.argv) > 1 else "ok"
+STATE: dict[str, dict] = {"A": {}, "B": {}}
+
+
+def start_endpoint(name: str, peer: str, command_port: int, data_port: int) -> None:
+    listeners = []
+    for port in (command_port, data_port):
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", port))
+        listener.listen(1)
+        listeners.append(listener)
+
+    def serve() -> None:
+        command_socket, _ = listeners[0].accept()
+        data_socket, _ = listeners[1].accept()
+        STATE[name].update(command_socket=command_socket, data_socket=data_socket)
+
+        def relay_data() -> None:
             while True:
-                b = ds.recv(65536)
-                if not b: return
-                o = estado[otro]
-                if MODO == "corto":      # simula payload truncado
-                    b = b[:len(b) // 2]
-                o["ds"].sendall(b)
-                if MODO == "extra":
-                    time.sleep(0.3); o["ds"].sendall(b"XX")
-                time.sleep(0.2)
-                cs.sendall(b"BUFFER 0\r")
-        threading.Thread(target=datos, daemon=True).start()
-        buf = b""
-        while True:
-            d = cs.recv(4096)
-            if not d: return
-            buf += d
-            while b"\r" in buf:
-                l, buf = buf.split(b"\r", 1); c = l.decode().split()
-                if MODO == "wrongmycall" and c[0] == "MYCALL":
-                    cs.sendall(b"WRONG\r"); continue
-                if MODO == "silencio" and c[0] == "MYCALL":
-                    continue
-                cs.sendall(b"WRONG\r" if (MODO == "disconnectwrong" and c[0] == "DISCONNECT") else b"OK\r")
-                if c[0] == "CONNECT":
+                payload = data_socket.recv(65536)
+                if not payload:
+                    return
+                if MODE == "truncated":
+                    payload = payload[: len(payload) // 2]
+                STATE[peer]["data_socket"].sendall(payload)
+                if MODE == "extra":
                     time.sleep(0.3)
-                    for n in (nombre, otro):
-                        ancho = "2300" if MODO == "ancho" else ("" if MODO == "connectedcorto" else "500")
-                        a_, b_ = ("A", "B") if MODO != "indicativo" else ("X", "Y")
-                        estado[n]["cs"].sendall(f"CONNECTED CALL-{a_} CALL-{b_} {ancho}\r".encode())
-                if c[0] == "DISCONNECT":
-                    for n in (nombre, otro):
-                        estado[n]["cs"].sendall(b"DISCONNECTED\r")
-    threading.Thread(target=atender, daemon=True).start()
+                    STATE[peer]["data_socket"].sendall(b"XX")
+                time.sleep(0.2)
+                command_socket.sendall(b"BUFFER 0\r")
 
-inst("A", "B", 18300, 18301)
-inst("B", "A", 19300, 19301)
+        threading.Thread(target=relay_data, daemon=True).start()
+        buffer = b""
+        while True:
+            received = command_socket.recv(4096)
+            if not received:
+                return
+            buffer += received
+            while b"\r" in buffer:
+                line, buffer = buffer.split(b"\r", 1)
+                parts = line.decode().split()
+                if MODE == "wrong_mycall" and parts[0] == "MYCALL":
+                    command_socket.sendall(b"WRONG\r")
+                    continue
+                if MODE == "silent" and parts[0] == "MYCALL":
+                    continue
+                command_socket.sendall(
+                    b"WRONG\r" if MODE == "disconnect_wrong" and parts[0] == "DISCONNECT" else b"OK\r"
+                )
+                if parts[0] == "CONNECT":
+                    time.sleep(0.3)
+                    for endpoint in (name, peer):
+                        bandwidth = "2300" if MODE == "wrong_bandwidth" else (
+                            "" if MODE == "short_connected" else "500"
+                        )
+                        source, destination = ("A", "B") if MODE != "wrong_callsign" else ("X", "Y")
+                        STATE[endpoint]["command_socket"].sendall(
+                            f"CONNECTED CALL-{source} CALL-{destination} {bandwidth}\r".encode()
+                        )
+                if parts[0] == "DISCONNECT":
+                    for endpoint in (name, peer):
+                        STATE[endpoint]["command_socket"].sendall(b"DISCONNECTED\r")
+
+    threading.Thread(target=serve, daemon=True).start()
+
+
+start_endpoint("A", "B", 18300, 18301)
+start_endpoint("B", "A", 19300, 19301)
 time.sleep(60)
