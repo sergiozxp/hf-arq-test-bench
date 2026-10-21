@@ -1,25 +1,13 @@
-"""smoke_cross_check.py - une el result.json del emisor con el del receptor.
+"""Cross-check sender and receiver Mercury smoke results.
 
-USO
-  python smoke_cross_check.py <result.json emisor> <result.json receptor>
+Usage:
+    python smoke_cross_check.py <sender-result.json> <receiver-result.json>
 
-QUÉ HACE
-  - Compara el hash de lo enviado (A) con el hash de lo recibido (B).
-  - Declara la entrega solo si el receptor la verificó, y la separa de la
-    confirmación ARQ del emisor (BUFFER 0).
-  - Señala contradicciones: ARQ confirmado pero B sin payload íntegro, o al revés.
-  - Resultado "incompleto" si la entrega se verificó pero falta evidencia que v6 exige guardar
-    (`evidencia_incompleta` en alguno de los dos resultados). Las advertencias se muestran aparte.
-  - Guarda cruce.json junto al resultado del receptor.
-
-QUÉ NO HACE
-  - No ejecuta ni repite pruebas, ni toca Mercury.
-  - No compara tiempos entre PCs: los relojes no están sincronizados en el smoke test.
-
-POR QUÉ
-  - BUFFER 0 indica confirmación ARQ, no entrega de aplicación (docs/TNC.md). La prueba
-    de entrega es el hash en B; este script impide mezclar ambos conceptos en el informe.
+The script verifies intact application payload delivery. A sender-side BUFFER 0
+is only an ARQ-level acknowledgement and never proves delivery.
 """
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
@@ -29,38 +17,55 @@ def main() -> int:
     if len(sys.argv) != 3:
         print(__doc__)
         return 2
-    em = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    rx = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-    hash_ok = em.get("payload_sha256") is not None and \
-        em.get("payload_sha256") == rx.get("payload_sha256")
-    avisos = []
-    if em.get("arq_confirmado") and not rx.get("entregado_integro"):
-        avisos.append("ARQ confirmó (BUFFER 0) pero B no verifica el payload: fallo de entrega")
-    if rx.get("entregado_integro") and not em.get("arq_confirmado"):
-        avisos.append("B verificó el payload pero A no vio BUFFER 0 (ARQ no observado)")
-    if not hash_ok:
-        avisos.append("el SHA-256 del emisor y del receptor no coinciden o falta alguno")
-    incompleta = (em.get("evidencia_incompleta") or []) + (rx.get("evidencia_incompleta") or [])
-    if incompleta:
-        avisos.append(f"evidencia incompleta (v6 la exige para aprobar): {incompleta}")
-    cruce = {
-        "tag_emisor": em.get("tag"), "tag_receptor": rx.get("tag"),
-        "arq_confirmado_emisor": em.get("arq_confirmado"),
-        "entregado_integro_receptor": rx.get("entregado_integro"),
-        "hash_coincide_emisor_receptor": hash_ok,
-        "fallos_emisor": em.get("fallos"), "fallos_receptor": rx.get("fallos"),
-        "advertencias_emisor": em.get("advertencias"), "advertencias_receptor": rx.get("advertencias"),
-        "avisos": avisos,
+    sender = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    receiver = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+    hash_matches = (
+        sender.get("payload_sha256") is not None
+        and sender.get("payload_sha256") == receiver.get("payload_sha256")
+    )
+    warnings: list[str] = []
+    if sender.get("arq_confirmed") and not receiver.get("delivered_intact"):
+        warnings.append("Sender observed BUFFER 0, but the receiver did not verify the payload.")
+    if receiver.get("delivered_intact") and not sender.get("arq_confirmed"):
+        warnings.append("Receiver verified the payload, but the sender did not observe BUFFER 0.")
+    if not hash_matches:
+        warnings.append("Sender and receiver SHA-256 values do not match or are missing.")
+    incomplete_evidence = (
+        (sender.get("incomplete_evidence") or [])
+        + (receiver.get("incomplete_evidence") or [])
+    )
+    if incomplete_evidence:
+        warnings.append("Required evidence could not be archived: " + "; ".join(incomplete_evidence))
+
+    delivery_verified = bool(
+        hash_matches
+        and receiver.get("delivered_intact")
+        and sender.get("sender_completed")
+    )
+    result = {
+        "sender_tag": sender.get("tag"),
+        "receiver_tag": receiver.get("tag"),
+        "sender_arq_confirmed": sender.get("arq_confirmed"),
+        "receiver_delivered_intact": receiver.get("delivered_intact"),
+        "sender_receiver_hash_matches": hash_matches,
+        "sender_failures": sender.get("failures"),
+        "receiver_failures": receiver.get("failures"),
+        "sender_warnings": sender.get("warnings"),
+        "receiver_warnings": receiver.get("warnings"),
+        "warnings": warnings,
+        "protocol_version": sender.get("protocol_version") or receiver.get("protocol_version"),
+        "smoke_profile": sender.get("smoke_profile") or receiver.get("smoke_profile"),
+        "outcome": (
+            "failed" if not delivery_verified
+            else "incomplete" if incomplete_evidence
+            else "passed"
+        ),
     }
-    entrega_ok = bool(hash_ok and rx.get("entregado_integro") and em.get("completado_emisor"))
-    # "incompleto": la entrega se verificó, pero faltan evidencias que v6 exige guardar.
-    cruce["resultado"] = ("fallo" if not entrega_ok
-                          else "incompleto" if incompleta else "aprobado")
-    salida = Path(sys.argv[2]).with_name("cruce.json")
-    salida.write_text(json.dumps(cruce, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(cruce, ensure_ascii=False, indent=2))
-    return 0 if cruce["resultado"] == "aprobado" else 1
+    output_path = Path(sys.argv[2]).with_name("cross_check.json")
+    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["outcome"] == "passed" else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
