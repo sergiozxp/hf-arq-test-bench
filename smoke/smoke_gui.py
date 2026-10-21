@@ -1,27 +1,11 @@
-"""smoke_gui.pyw - ventana con botones para ejecutar el smoke test sin escribir comandos.
+"""HF-ARQ Modem Smoke GUI.
 
-CÓMO SE USA: doble clic en HF-ARQ-Smoke.exe (o, con Python instalado, en Iniciar.bat).
-Rellenar «1. Este PC», elegir la prueba en «2. Prueba» y pulsar EJECUTAR. El resultado
-aparece en grande. Los resultados quedan en la carpeta HF-ARQ-Smoke-datos, junto al .exe.
-
-QUÉ HACE
-  - Guarda lo escrito en el formulario y genera smoke_config.toml.
-  - Ejecuta los mismos scripts que se usarían a mano (mercury_smoke_client.py,
-    pat_smoke_test.py, smoke_cross_check.py) y muestra su registro en vivo.
-  - Muestra el resultado con color: verde (aprobado), rojo (fallo) o naranja (a revisar).
-  - Abre la carpeta de resultados y la comprime en un .zip para llevarla a otro PC.
-
-QUÉ NO HACE
-  - No inicia Mercury ni Pat, ni cambia su configuración (eso se hace a mano y se registra).
-  - No decide si algo aprobó: muestra lo que decidieron los scripts.
-  - No copia archivos entre PCs por su cuenta: el state.json del PC A se lleva al PC B
-    con el botón «Guardar copia de state.json» y «Elegir state.json» (pendrive o carpeta compartida).
-  - No reintenta pruebas ni encadena variantes: cada pulsación es una prueba.
-
-POR QUÉ
-  - El usuario solo dispone de mouse y teclado mínimo: la ventana evita escribir comandos y
-    reduce errores de tipeo, pero ejecuta exactamente lo mismo que la línea de comandos.
+This alpha release runs the Mercury 1.9.19 smoke profile only.  It neither
+starts Mercury nor changes its settings; it launches the same Python scripts
+that are available from a command prompt and presents their result files.
 """
+from __future__ import annotations
+
 import json
 import os
 import queue
@@ -32,372 +16,339 @@ import threading
 import time
 from pathlib import Path
 
-import smoke_gui_logica as L
+import smoke_gui_logic as logic
 
-# Modo «ejecutar un script»: el .exe se relanza a sí mismo con --script (ver smoke_gui_logica).
-# Se decide ANTES de importar tkinter para que este modo no necesite ventana.
 if __name__ == "__main__" and len(sys.argv) >= 3 and sys.argv[1] == "--script":
-    sys.exit(L.ejecutar_script(sys.argv[2], sys.argv[3:]))
+    sys.exit(logic.run_script(sys.argv[2], sys.argv[3:]))
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-# Importados aquí para que PyInstaller incluya los scripts dentro del .exe.
-import mercury_smoke_client  # noqa: F401
-import pat_smoke_test  # noqa: F401
-import smoke_cross_check  # noqa: F401
+import mercury_smoke_client  # noqa: F401  # included by PyInstaller
+import smoke_cross_check  # noqa: F401  # included by PyInstaller
 
-EMPAQUETADO = bool(getattr(sys, "frozen", False))
+PACKAGED = bool(getattr(sys, "frozen", False))
+COLORS = {"green": "#1b7f3b", "red": "#b3261e", "orange": "#b26a00", "gray": "#555555"}
 
 
-def carpeta_de_trabajo() -> Path:
-    """Dónde se guardan configuración y resultados. Con el .exe: HF-ARQ-Smoke-datos junto al
-    programa (o en Documentos si esa carpeta no admite escritura). Sin .exe: junto al script."""
-    if not EMPAQUETADO:
+def work_directory() -> Path:
+    """Return a writable directory beside the executable, falling back to Documents."""
+    if not PACKAGED:
         return Path(__file__).resolve().parent
-    candidatas = [Path(sys.executable).resolve().parent / "HF-ARQ-Smoke-datos",
-                  Path.home() / "Documents" / "HF-ARQ-Smoke-datos"]
-    for c in candidatas:
+    candidates = [
+        Path(sys.executable).resolve().parent / "HF-ARQ-Modem-Smoke-data",
+        Path.home() / "Documents" / "HF-ARQ-Modem-Smoke-data",
+    ]
+    for candidate in candidates:
         try:
-            c.mkdir(parents=True, exist_ok=True)
-            prueba = c / ".escritura"
-            prueba.write_text("ok", encoding="utf-8")
-            prueba.unlink()
-            return c
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return candidate
         except OSError:
             continue
-    return candidatas[-1]
+    return candidates[-1]
 
 
-AQUI = carpeta_de_trabajo()
-RESULTADOS = AQUI / "results"
-AJUSTES = AQUI / "smoke_gui_ajustes.json"
-COLORES = {"verde": "#1b7f3b", "rojo": "#b3261e", "naranja": "#b26a00", "gris": "#555555"}
+HERE = work_directory()
+RESULTS = HERE / "results"
+SETTINGS = HERE / "modem_smoke_settings.json"
 
 
-def comando_de_proceso(cmd: list) -> list:
-    """Lista de argumentos para lanzar un script. .exe: se relanza a sí mismo con --script;
-    con Python: se ejecuta el script con python.exe (sin consola propia del programa)."""
-    if EMPAQUETADO:
-        return [sys.executable, "--script", *cmd]
-    return [python_consola(), "-u", str(Path(__file__).resolve().parent / cmd[0]), *cmd[1:]]
+def process_command(command: list[str]) -> list[str]:
+    """Build the executable or Python invocation for one bundled script."""
+    if PACKAGED:
+        return [sys.executable, "--script", *command]
+    return [console_python(), "-u", str(Path(__file__).resolve().parent / command[0]), *command[1:]]
 
 
-def python_consola() -> str:
-    """Usa python.exe (no pythonw.exe) para los scripts, así tienen salida estándar."""
-    exe = Path(sys.executable)
-    if exe.name.lower() == "pythonw.exe":
-        alt = exe.with_name("python.exe")
-        if alt.exists():
-            return str(alt)
-    return str(exe)
+def console_python() -> str:
+    executable = Path(sys.executable)
+    if executable.name.lower() == "pythonw.exe":
+        alternative = executable.with_name("python.exe")
+        if alternative.exists():
+            return str(alternative)
+    return str(executable)
 
 
-class Ventana(tk.Tk):
+class ModemSmokeWindow(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Smoke test Mercury + Pat")
-        self.geometry("980x860")
-        self.cola: "queue.Queue[tuple[str, str]]" = queue.Queue()
-        self.proc = None
-        self.hilo = None
-        self.state_elegido = tk.StringVar()
-        self._ultimo_resultado: str | None = None
-        self.v = {k: tk.StringVar() for k in
-                  ("rol", "mycall", "peer_call", "bw", "pat_url", "mercury_zip", "mercury_exe", "pat_exe",
-                   "mercury_ini", "mercury_log", "pat_config", "pat_log")}
-        self.v["rol"].set("A")
-        self.v["bw"].set("BW500")
-        self.v["pat_url"].set("http://localhost:8080")
-        self._cargar_ajustes()
-        self._construir()
-        self.after(100, self._vaciar_cola)
-        self.protocol("WM_DELETE_WINDOW", self._cerrar)
+        self.title("HF-ARQ Modem Smoke — Mercury")
+        self.geometry("960x735")
+        self.event_queue: "queue.Queue[tuple[str, str]]" = queue.Queue()
+        self.process: subprocess.Popen | None = None
+        self.worker: threading.Thread | None = None
+        self.values = {
+            key: tk.StringVar()
+            for key in (
+                "role", "mycall", "peer_call", "bw", "mercury_zip",
+                "mercury_exe", "mercury_ini", "mercury_log",
+            )
+        }
+        self.values["role"].set("A")
+        self.values["bw"].set("BW500")
+        self._load_settings()
+        self._build()
+        self.after(100, self._drain_queue)
+        self.protocol("WM_DELETE_WINDOW", self._close)
 
-    # ------------------------------------------------------------ interfaz
-    def _construir(self):
+    def _build(self) -> None:
         pad = dict(padx=8, pady=4)
-        f1 = ttk.LabelFrame(self, text="1. Este PC")
-        f1.pack(fill="x", **pad)
-        ttk.Label(f1, text="Este PC es:").grid(row=0, column=0, sticky="w", **pad)
-        ttk.Radiobutton(f1, text="PC A (emisor)", variable=self.v["rol"], value="A").grid(row=0, column=1, sticky="w")
-        ttk.Radiobutton(f1, text="PC B (receptor)", variable=self.v["rol"], value="B").grid(row=0, column=2, sticky="w")
-        ttk.Label(f1, text="Mi indicativo:").grid(row=1, column=0, sticky="w", **pad)
-        ttk.Entry(f1, textvariable=self.v["mycall"], width=16).grid(row=1, column=1, sticky="w")
-        ttk.Label(f1, text="Indicativo del otro PC:").grid(row=1, column=2, sticky="e", **pad)
-        ttk.Entry(f1, textvariable=self.v["peer_call"], width=16).grid(row=1, column=3, sticky="w")
-        ttk.Label(f1, text="Ancho de banda:").grid(row=2, column=0, sticky="w", **pad)
-        ttk.Combobox(f1, textvariable=self.v["bw"], values=L.ANCHOS, width=10,
-                     state="readonly").grid(row=2, column=1, sticky="w")
-        ttk.Label(f1, text="Dirección de Pat:").grid(row=2, column=2, sticky="e", **pad)
-        ttk.Entry(f1, textvariable=self.v["pat_url"], width=26).grid(row=2, column=3, sticky="w")
-        for i, (clave, texto) in enumerate((("mercury_zip", "Mercury .zip (para registrar su SHA-256):"),
-                                            ("mercury_exe", "mercury.exe:"), ("pat_exe", "pat.exe:"),
-                                            ("mercury_ini", "Configuración de Mercury (.ini):"),
-                                            ("mercury_log", "Registro (log) de Mercury:"),
-                                            ("pat_config", "Configuración de Pat (config.json):"),
-                                            ("pat_log", "Registro (log) de Pat:"))):
-            ttk.Label(f1, text=texto).grid(row=3 + i, column=0, columnspan=2, sticky="w", **pad)
-            ttk.Entry(f1, textvariable=self.v[clave], width=60).grid(row=3 + i, column=2, columnspan=2, sticky="we")
-            ttk.Button(f1, text="Examinar…", command=lambda c=clave: self._examinar(c)).grid(row=3 + i, column=4, **pad)
+        station = ttk.LabelFrame(self, text="1. Local station")
+        station.pack(fill="x", **pad)
+        ttk.Label(station, text="This computer:").grid(row=0, column=0, sticky="w", **pad)
+        ttk.Radiobutton(station, text="PC A (sender)", variable=self.values["role"], value="A").grid(
+            row=0, column=1, sticky="w"
+        )
+        ttk.Radiobutton(station, text="PC B (receiver)", variable=self.values["role"], value="B").grid(
+            row=0, column=2, sticky="w"
+        )
+        ttk.Label(station, text="Local callsign:").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Entry(station, textvariable=self.values["mycall"], width=18).grid(row=1, column=1, sticky="w")
+        ttk.Label(station, text="Peer callsign:").grid(row=1, column=2, sticky="e", **pad)
+        ttk.Entry(station, textvariable=self.values["peer_call"], width=18).grid(row=1, column=3, sticky="w")
+        ttk.Label(station, text="Bandwidth:").grid(row=2, column=0, sticky="w", **pad)
+        ttk.Combobox(
+            station, textvariable=self.values["bw"], values=logic.BANDWIDTHS,
+            width=10, state="readonly"
+        ).grid(row=2, column=1, sticky="w")
 
-        f2 = ttk.LabelFrame(self, text="2. Prueba")
-        f2.pack(fill="x", **pad)
-        self.grupo = tk.StringVar(value="Mercury (puertos 8300/8301)")
-        ttk.Label(f2, text="Programa:").grid(row=0, column=0, sticky="w", **pad)
-        cg = ttk.Combobox(f2, textvariable=self.grupo, state="readonly", width=30,
-                          values=["Mercury (puertos 8300/8301)", "Pat (API HTTP)"])
-        cg.grid(row=0, column=1, sticky="w")
-        cg.bind("<<ComboboxSelected>>", lambda e: self._llenar_pruebas())
-        ttk.Label(f2, text="Prueba:").grid(row=1, column=0, sticky="w", **pad)
-        self.prueba = tk.StringVar()
-        self.cb_prueba = ttk.Combobox(f2, textvariable=self.prueba, state="readonly", width=62)
-        self.cb_prueba.grid(row=1, column=1, columnspan=3, sticky="w")
-        ttk.Label(f2, text="Repetición (solo H1/H2):").grid(row=2, column=0, sticky="w", **pad)
-        self.rep = tk.IntVar(value=1)
-        ttk.Spinbox(f2, from_=1, to=3, textvariable=self.rep, width=4).grid(row=2, column=1, sticky="w")
-        self.btn_ejecutar = tk.Button(f2, text="EJECUTAR", font=("Segoe UI", 13, "bold"), bg="#1f5fbf",
-                                      fg="white", command=self._ejecutar, padx=24, pady=6)
-        self.btn_ejecutar.grid(row=3, column=0, columnspan=2, sticky="w", **pad)
-        self.btn_detener = ttk.Button(f2, text="Detener", command=self._detener, state="disabled")
-        self.btn_detener.grid(row=3, column=2, sticky="w", **pad)
-        self._llenar_pruebas()
+        files = (
+            ("mercury_zip", "Mercury ZIP (record SHA-256):"),
+            ("mercury_exe", "mercury.exe:"),
+            ("mercury_ini", "Mercury configuration (.ini):"),
+            ("mercury_log", "Mercury log:"),
+        )
+        for row, (key, label) in enumerate(files, start=3):
+            ttk.Label(station, text=label).grid(row=row, column=0, columnspan=2, sticky="w", **pad)
+            ttk.Entry(station, textvariable=self.values[key], width=60).grid(
+                row=row, column=2, columnspan=2, sticky="we"
+            )
+            ttk.Button(station, text="Browse…", command=lambda item=key: self._browse(item)).grid(
+                row=row, column=4, **pad
+            )
 
-        f3 = ttk.LabelFrame(self, text="3. Resultado")
-        f3.pack(fill="both", expand=True, **pad)
-        self.lbl = tk.Label(f3, text="Sin ejecutar.", font=("Segoe UI", 12, "bold"), fg=COLORES["gris"],
-                            wraplength=900, justify="left", anchor="w")
-        self.lbl.pack(fill="x", padx=8, pady=6)
-        marco = ttk.Frame(f3)
-        marco.pack(fill="both", expand=True, padx=8, pady=4)
-        self.txt = tk.Text(marco, height=14, wrap="word", font=("Consolas", 9))
-        sb = ttk.Scrollbar(marco, command=self.txt.yview)
-        self.txt.configure(yscrollcommand=sb.set)
-        self.txt.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
+        test = ttk.LabelFrame(self, text="2. Mercury 1.9.19 smoke test")
+        test.pack(fill="x", **pad)
+        ttk.Label(test, text="Test:").grid(row=0, column=0, sticky="w", **pad)
+        self.test_name = tk.StringVar(value=next(iter(logic.MERCURY_TESTS)))
+        ttk.Combobox(
+            test, textvariable=self.test_name, values=list(logic.MERCURY_TESTS),
+            width=62, state="readonly"
+        ).grid(row=0, column=1, columnspan=3, sticky="w")
+        ttk.Label(test, text="Repeat (H1 only):").grid(row=1, column=0, sticky="w", **pad)
+        self.repeat = tk.IntVar(value=1)
+        ttk.Spinbox(test, from_=1, to=3, textvariable=self.repeat, width=4).grid(
+            row=1, column=1, sticky="w"
+        )
+        self.run_button = tk.Button(
+            test, text="RUN", font=("Segoe UI", 13, "bold"), bg="#1f5fbf",
+            fg="white", command=self._run, padx=24, pady=6
+        )
+        self.run_button.grid(row=2, column=0, columnspan=2, sticky="w", **pad)
+        self.stop_button = ttk.Button(test, text="Stop", command=self._stop, state="disabled")
+        self.stop_button.grid(row=2, column=2, sticky="w", **pad)
 
-        f4 = ttk.LabelFrame(self, text="Herramientas")
-        f4.pack(fill="x", **pad)
-        botones = [("Abrir carpeta de resultados", self._abrir_resultados),
-                   ("Comprimir resultados (.zip)", self._comprimir),
-                   ("Cruzar resultados A y B…", self._cruzar),
-                   ("Elegir state.json (PC B)…", self._elegir_state),
-                   ("Guardar copia de state.json (PC A)…", self._guardar_state)]
-        for i, (t, c) in enumerate(botones):
-            ttk.Button(f4, text=t, command=c).grid(row=0, column=i, padx=4, pady=6)
-        ttk.Label(f4, textvariable=self.state_elegido, foreground="#555").grid(
-            row=1, column=0, columnspan=5, sticky="w", padx=8)
-        ttk.Label(f4, text=f"Carpeta de trabajo (config y resultados): {AQUI}",
-                  foreground="#555").grid(row=2, column=0, columnspan=5, sticky="w", padx=8)
+        output = ttk.LabelFrame(self, text="3. Result")
+        output.pack(fill="both", expand=True, **pad)
+        self.summary = tk.Label(
+            output, text="Not run.", font=("Segoe UI", 12, "bold"), fg=COLORS["gray"],
+            wraplength=875, justify="left", anchor="w"
+        )
+        self.summary.pack(fill="x", padx=8, pady=6)
+        frame = ttk.Frame(output)
+        frame.pack(fill="both", expand=True, padx=8, pady=4)
+        self.log = tk.Text(frame, height=13, wrap="word", font=("Consolas", 9))
+        scrollbar = ttk.Scrollbar(frame, command=self.log.yview)
+        self.log.configure(yscrollcommand=scrollbar.set)
+        self.log.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
-    def _llenar_pruebas(self):
-        cat = L.MERCURY if self.grupo.get().startswith("Mercury") else L.PAT
-        self.cb_prueba["values"] = list(cat)
-        self.prueba.set(next(iter(cat)))
+        tools = ttk.LabelFrame(self, text="Tools")
+        tools.pack(fill="x", **pad)
+        ttk.Button(tools, text="Open results folder", command=self._open_results).grid(
+            row=0, column=0, padx=4, pady=6
+        )
+        ttk.Button(tools, text="Create results ZIP", command=self._zip_results).grid(
+            row=0, column=1, padx=4, pady=6
+        )
+        ttk.Button(tools, text="Cross-check A and B results…", command=self._cross_check).grid(
+            row=0, column=2, padx=4, pady=6
+        )
+        ttk.Label(tools, text=f"Working directory: {HERE}", foreground="#555").grid(
+            row=1, column=0, columnspan=4, sticky="w", padx=8
+        )
 
-    # ------------------------------------------------------------ utilidades
-    def _examinar(self, clave):
-        ruta = filedialog.askopenfilename(title="Elegir archivo")
-        if ruta:
-            self.v[clave].set(ruta)
+    def _browse(self, key: str) -> None:
+        selected = filedialog.askopenfilename(title="Select file")
+        if selected:
+            self.values[key].set(selected)
 
-    def _escribir(self, texto, tag=None):
-        self.txt.insert("end", texto + "\n", tag)
-        self.txt.see("end")
+    def _form_values(self) -> dict:
+        return {key: variable.get() for key, variable in self.values.items()}
 
-    def _mostrar(self, frase, color):
-        self.lbl.configure(text=frase, fg=COLORES.get(color, COLORES["gris"]))
-
-    def _datos(self) -> dict:
-        return {k: var.get() for k, var in self.v.items()}
-
-    def _cargar_ajustes(self):
+    def _load_settings(self) -> None:
         try:
-            for k, val in json.loads(AJUSTES.read_text(encoding="utf-8")).items():
-                if k in self.v:
-                    self.v[k].set(val)
+            for key, value in json.loads(SETTINGS.read_text(encoding="utf-8")).items():
+                if key in self.values:
+                    self.values[key].set(value)
         except (OSError, ValueError):
             pass
 
-    def _guardar_ajustes(self):
+    def _save_settings(self) -> None:
         try:
-            AJUSTES.write_text(json.dumps(self._datos(), ensure_ascii=False, indent=2), encoding="utf-8")
+            SETTINGS.write_text(json.dumps(self._form_values(), indent=2), encoding="utf-8")
         except OSError:
             pass
 
-    # ------------------------------------------------------------ ejecución
-    def _ocupado(self, si: bool):
-        self.btn_ejecutar.configure(state="disabled" if si else "normal")
-        self.btn_detener.configure(state="normal" if si else "disabled")
+    def _append_log(self, text: str) -> None:
+        self.log.insert("end", text + "\n")
+        self.log.see("end")
 
-    def _ejecutar(self):
-        if self.hilo and self.hilo.is_alive():
-            return
-        datos = self._datos()
-        errores = L.validar_formulario(datos)
-        if errores:
-            messagebox.showwarning("Faltan datos", "\n".join(errores))
-            return
-        self.v["mycall"].set(datos["mycall"])
-        self.v["peer_call"].set(datos["peer_call"])
-        self._guardar_ajustes()
-        (AQUI / "smoke_config.toml").write_text(L.texto_config(datos), encoding="utf-8")
-        try:
-            comandos = self._plan(datos)
-        except ValueError as e:
-            messagebox.showwarning("No se puede ejecutar todavía", str(e))
-            return
-        self.txt.delete("1.0", "end")
-        self._mostrar("Ejecutando… (no cierre la ventana)", "gris")
-        if self.prueba.get().startswith("E0-2  Variante V3"):
-            self._escribir(L.INSTRUCCION_V3)
-        self._ocupado(True)
-        self.hilo = threading.Thread(target=self._correr, args=(comandos,), daemon=True)
-        self.hilo.start()
+    def _set_summary(self, text: str, color: str) -> None:
+        self.summary.configure(text=text, fg=COLORS.get(color, COLORS["gray"]))
 
-    def _plan(self, datos) -> list:
-        rol, rep, nombre = datos["rol"], self.rep.get(), self.prueba.get()
-        if self.grupo.get().startswith("Mercury"):
-            return L.comandos_mercury(L.MERCURY[nombre], rol, rep)
-        state = self.state_elegido.get() or None
-        if state is None:
-            ult = L.ultimo_state(RESULTADOS)
-            state = str(ult) if ult else None
-        return L.comandos_pat(L.PAT[nombre], rol, rep, datos["peer_call"], state,
-                              L.ultimo_check_in(RESULTADOS))
+    def _set_busy(self, busy: bool) -> None:
+        self.run_button.configure(state="disabled" if busy else "normal")
+        self.stop_button.configure(state="normal" if busy else "disabled")
 
-    def _correr(self, comandos):
-        """Hilo de trabajo: ejecuta cada comando en orden y envía su salida a la cola."""
-        env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    def _run(self) -> None:
+        if self.worker and self.worker.is_alive():
+            return
+        values = self._form_values()
+        errors = logic.validate_form(values)
+        if errors:
+            messagebox.showwarning("Missing or invalid data", "\n".join(errors))
+            return
+        self.values["mycall"].set(values["mycall"])
+        self.values["peer_call"].set(values["peer_call"])
+        self._save_settings()
+        (HERE / "smoke_config.toml").write_text(logic.config_text(values), encoding="utf-8")
+        preset = logic.MERCURY_TESTS[self.test_name.get()]
+        commands = logic.mercury_commands(preset, values["role"], self.repeat.get())
+        self.log.delete("1.0", "end")
+        self._set_summary("Running… Do not close this window.", "gray")
+        if preset["tag"] == "E0-2_V3":
+            self._append_log(logic.V3_INSTRUCTION)
+        self._set_busy(True)
+        self.worker = threading.Thread(target=self._run_commands, args=(commands,), daemon=True)
+        self.worker.start()
+
+    def _run_commands(self, commands: list[list[str]]) -> None:
+        environment = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        ultimo_res = None
-        for cmd in comandos:
-            self.cola.put(("log", f"\n>>> {' '.join(cmd)}"))
+        latest_result: str | None = None
+        for command in commands:
+            self.event_queue.put(("log", "\n>>> " + " ".join(command)))
             try:
-                self.proc = subprocess.Popen(comando_de_proceso(cmd), cwd=str(AQUI), env=env,
-                                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                             encoding="utf-8", errors="replace", creationflags=flags)
-            except OSError as e:
-                self.cola.put(("log", f"No se pudo iniciar el script: {e}"))
-                self.cola.put(("resumen", json.dumps({"excepcion": str(e)})))
+                self.process = subprocess.Popen(
+                    process_command(command), cwd=str(HERE), env=environment,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                    encoding="utf-8", errors="replace", creationflags=flags,
+                )
+            except OSError as error:
+                self.event_queue.put(("log", f"Could not start script: {error}"))
+                self.event_queue.put(("summary", json.dumps({"exception": str(error)})))
                 break
-            for linea in self.proc.stdout:
-                linea = linea.rstrip("\n")
-                self.cola.put(("log", linea))
-                ruta = L.ruta_resultado_en_linea(linea)
-                if ruta:
-                    ultimo_res = ruta
-                st = L.ruta_state_en_linea(linea)
-                if st:
-                    self.cola.put(("state", st))
-            codigo = self.proc.wait()
-            # Los scripts imprimen la ruta relativa a su carpeta de trabajo (AQUI), no a la del programa.
-            ruta_res = (AQUI / ultimo_res) if ultimo_res else None
-            if ruta_res and ruta_res.is_file():
-                self.cola.put(("resumen", ruta_res.read_text(encoding="utf-8")))
-            # Un paso que falla corta la secuencia (salvo «disconnect», que es solo preparación).
-            if codigo != 0 and "disconnect" not in cmd:
+            assert self.process.stdout is not None
+            for line in self.process.stdout:
+                line = line.rstrip("\n")
+                self.event_queue.put(("log", line))
+                path = logic.result_path_from_line(line)
+                if path:
+                    latest_result = path
+            exit_code = self.process.wait()
+            result_path = HERE / latest_result if latest_result else None
+            if result_path and result_path.is_file():
+                self.event_queue.put(("summary", result_path.read_text(encoding="utf-8")))
+            if exit_code != 0:
                 break
-        self.cola.put(("fin", ""))
+        self.event_queue.put(("done", ""))
 
-    def _vaciar_cola(self):
+    def _drain_queue(self) -> None:
         try:
             while True:
-                tipo, dato = self.cola.get_nowait()
-                if tipo == "log":
-                    self._escribir(dato)
-                elif tipo == "state":
-                    self.state_elegido.set(dato)
-                    self._escribir("Archivo state.json listo. Cópielo al PC B con «Guardar copia de state.json».")
-                elif tipo == "resumen":
+                event, data = self.event_queue.get_nowait()
+                if event == "log":
+                    self._append_log(data)
+                elif event == "summary":
                     try:
-                        frase, color = L.resumir(json.loads(dato))
+                        text, color = logic.summarize(json.loads(data))
                     except ValueError:
-                        frase, color = "No se pudo leer el resultado.", "rojo"
-                    self._mostrar(frase, color)
-                elif tipo == "fin":
-                    self._ocupado(False)
+                        text, color = "Could not parse the result file.", "red"
+                    self._set_summary(text, color)
+                elif event == "done":
+                    self._set_busy(False)
         except queue.Empty:
             pass
-        self.after(100, self._vaciar_cola)
+        self.after(100, self._drain_queue)
 
-    def _detener(self):
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
-            self._escribir("Detenido por el usuario.")
+    def _stop(self) -> None:
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
+            self._append_log("Stopped by user.")
 
-    # ------------------------------------------------------------ herramientas
-    def _abrir_resultados(self):
-        RESULTADOS.mkdir(exist_ok=True)
+    def _open_results(self) -> None:
+        RESULTS.mkdir(exist_ok=True)
         if os.name == "nt":
-            os.startfile(str(RESULTADOS))  # noqa: S606
+            os.startfile(str(RESULTS))  # noqa: S606
         else:
-            messagebox.showinfo("Resultados", str(RESULTADOS))
+            messagebox.showinfo("Results", str(RESULTS))
 
-    def _comprimir(self):
-        if not RESULTADOS.exists():
-            messagebox.showinfo("Resultados", "Todavía no hay resultados.")
+    def _zip_results(self) -> None:
+        if not RESULTS.exists():
+            messagebox.showinfo("Results", "There are no results yet.")
             return
-        destino = AQUI / f"resultados_{self.v['rol'].get()}_{time.strftime('%Y%m%d_%H%M%S')}"
-        archivo = shutil.make_archive(str(destino), "zip", str(RESULTADOS))
-        messagebox.showinfo("Resultados comprimidos", f"Archivo creado:\n{archivo}")
+        destination = HERE / f"results_{self.values['role'].get()}_{time.strftime('%Y%m%d_%H%M%S')}"
+        archive = shutil.make_archive(str(destination), "zip", str(RESULTS))
+        messagebox.showinfo("Results ZIP", f"Created:\n{archive}")
 
-    def _elegir_state(self):
-        ruta = filedialog.askopenfilename(title="Elegir el state.json del PC A",
-                                          filetypes=[("state.json", "state.json"), ("JSON", "*.json")])
-        if ruta:
-            self.state_elegido.set(ruta)
-
-    def _guardar_state(self):
-        origen = self.state_elegido.get() or (str(L.ultimo_state(RESULTADOS) or ""))
-        if not origen or not Path(origen).is_file():
-            messagebox.showinfo("state.json", "Todavía no hay un state.json. Ejecute primero E0-3 o H2 en este PC.")
+    def _cross_check(self) -> None:
+        sender = filedialog.askopenfilename(
+            title="1/2: sender result.json (PC A)", initialdir=str(RESULTS),
+            filetypes=[("result.json", "result.json"), ("JSON", "*.json")],
+        )
+        if not sender:
             return
-        destino = filedialog.asksaveasfilename(title="Guardar copia de state.json", initialfile="state.json",
-                                               defaultextension=".json")
-        if destino:
-            shutil.copyfile(origen, destino)
-            messagebox.showinfo("state.json", f"Copia guardada en:\n{destino}")
-
-    def _cruzar(self):
-        em = filedialog.askopenfilename(title="1/2: result.json del EMISOR (PC A)", initialdir=str(RESULTADOS),
-                                        filetypes=[("result.json", "result.json")])
-        if not em:
+        receiver = filedialog.askopenfilename(
+            title="2/2: receiver result.json (PC B)", initialdir=str(RESULTS),
+            filetypes=[("result.json", "result.json"), ("JSON", "*.json")],
+        )
+        if not receiver or (self.worker and self.worker.is_alive()):
             return
-        rx = filedialog.askopenfilename(title="2/2: result.json del RECEPTOR (PC B)", initialdir=str(RESULTADOS),
-                                        filetypes=[("result.json", "result.json")])
-        if not rx or (self.hilo and self.hilo.is_alive()):
-            return
-        self.txt.delete("1.0", "end")
-        self._ocupado(True)
-        self.hilo = threading.Thread(target=self._correr_cruce, args=(em, rx), daemon=True)
-        self.hilo.start()
+        self.log.delete("1.0", "end")
+        self._set_busy(True)
+        self.worker = threading.Thread(target=self._run_cross_check, args=(sender, receiver), daemon=True)
+        self.worker.start()
 
-    def _correr_cruce(self, em, rx):
-        env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    def _run_cross_check(self, sender: str, receiver: str) -> None:
+        environment = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        r = subprocess.run(comando_de_proceso(["smoke_cross_check.py", em, rx]), cwd=str(AQUI), env=env,
-                           capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           creationflags=flags)
-        self.cola.put(("log", r.stdout + r.stderr))
-        cruce = Path(rx).with_name("cruce.json")
-        if cruce.is_file():
-            self.cola.put(("resumen", cruce.read_text(encoding="utf-8")))
-        self.cola.put(("fin", ""))
+        result = subprocess.run(
+            process_command(["smoke_cross_check.py", sender, receiver]), cwd=str(HERE),
+            env=environment, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", creationflags=flags,
+        )
+        self.event_queue.put(("log", result.stdout + result.stderr))
+        cross_check = Path(receiver).with_name("cross_check.json")
+        if cross_check.is_file():
+            self.event_queue.put(("summary", cross_check.read_text(encoding="utf-8")))
+        self.event_queue.put(("done", ""))
 
-    def _cerrar(self):
-        if self.hilo and self.hilo.is_alive():
-            if not messagebox.askyesno("Hay una prueba en curso", "¿Cerrar y detenerla?"):
+    def _close(self) -> None:
+        if self.worker and self.worker.is_alive():
+            if not messagebox.askyesno("Test in progress", "Close and stop it?"):
                 return
-            self._detener()
+            self._stop()
         self.destroy()
 
 
 if __name__ == "__main__":
     if sys.version_info < (3, 11):
-        raiz = tk.Tk()
-        raiz.withdraw()
-        messagebox.showerror("Python demasiado antiguo",
-                             "Se necesita Python 3.11 o superior (python.org).")
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Python version", "Python 3.11 or newer is required.")
         sys.exit(1)
-    Ventana().mainloop()
+    ModemSmokeWindow().mainloop()
