@@ -1,36 +1,47 @@
-# hf-arq-test-bench
+# HF-ARQ Modem Bench
 
-Banco de pruebas reproducible para comparar la entrega de mensajes por HF ARQ en tres
-configuraciones, con canal simulado y sin radios, todo en Windows:
+HF-ARQ Modem Bench is a Windows test bench for comparing HF ARQ modems under
+reproducible, simulated-channel conditions. Its research question is limited to
+modem and transport behaviour:
 
-1. VarAC + VARA (sin licencia)
-2. VarAC + VARA (con licencia)
-3. Mercury 1.9.19 + Pat 1.0.0
+1. Mercury 1.9.19
+2. VARA HF, unlicensed
+3. VARA HF, licensed
 
-**Estado: borrador de trabajo, repositorio privado.** Nada de lo que hay aquí está probado
-todavía con Mercury, Pat, VARA ni VarAC reales; los scripts se validaron solo contra
-simuladores de la lógica. No se presentan resultados.
+Pat and VarAC are not part of the active benchmark. They are application-layer
+programs and would confound a modem comparison with queueing, compression and
+message-workflow behaviour.
 
-## Contenido
-- `docs/banco_pruebas_vara_mercury_v4.md`: diseño del banco (fuente de verdad del método).
-- `docs/smoke_test_mercury_windows_v6.md`: smoke test previo (E0, H1, H2) y criterios de salida.
-- `smoke/`: scripts del smoke test (ver `smoke/README.md`).
+## Status
 
-## Qué es norma y qué es diseño propio
-- Canal ionosférico: modelo de tipo Watterson, comparado con ITU-R F.1487 (la tabla de
-  correspondencia parámetro a parámetro está pendiente; hasta entonces no se llama
-  "conforme a F.1487").
-- Integridad: SHA-256 (FIPS 180-4).
-- Métricas de entrega, ACK de aplicación, árbitro semidúplex y estadística: diseño de los
-  autores, descrito en `docs/`.
+This is v0.2.0-alpha.1. The repository contains a Mercury-only smoke profile
+and the v5 protocol specification. The direct VARA adapter, common benchmark
+client and channel simulator are not implemented yet. No performance results
+are published, and the bundled smoke code has not been run against real Mercury
+or VARA installations.
 
-## Licencia
-Código: MIT (ver `LICENSE`). Documentos y datos: licencia por decidir antes de hacer
-público el repositorio.
+The historical v0.1.0 release remains unchanged. It used the earlier Mercury
+plus Pat scope and is superseded for new work.
 
-## Descarga para Windows (sin instalar Python)
+## Current contents
 
-`HF-ARQ-Smoke.exe` se compila en GitHub Actions y se publica en *Releases* con su SHA-256.
-Guía de uso para el operador: [docs/guia_operador_windows.md](docs/guia_operador_windows.md).
-Las pruebas del lanzador usan Mercury y Pat **simulados** (`tests/`); no sustituyen a las
-pruebas E0 con los programas reales.
+- docs/modem_benchmark_protocol_v5.md
+- docs/modem_smoke_profile_ms1.md
+- docs/windows_modem_smoke_guide.md
+- docs/protocol_compatibility.md
+- smoke/: Mercury 1.9.19 preflight scripts and an optional Windows GUI
+
+## Scope of the first benchmark table
+
+The primary Phase 1 table has nine presentation rows (three channel conditions
+by three modems) and 18 statistical cells: every row reports both binary_200B
+and binary_10KB. The binary payloads are deterministic, high-entropy byte
+streams so that application or modem compression cannot dominate the comparison.
+
+Text payloads are an optional secondary sensitivity test and must declare any
+observed compression.
+
+## License
+
+The code in this repository is released under the MIT License. Mercury, VARA,
+and their associated documentation are separate third-party products.
