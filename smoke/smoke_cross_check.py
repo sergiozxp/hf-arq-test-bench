@@ -97,6 +97,12 @@ def cross_check(em: dict, rx: dict) -> dict:
     if incomplete:
         warnings.append(f"incomplete evidence (required by MS-1.0): {incomplete}")
     protocol = (em.get("protocol_warnings") or []) + (rx.get("protocol_warnings") or [])
+    # VARA states the link mode itself ("LINK UNREGISTERED"); it must agree with the arm.
+    for side, res in (("sender", em), ("receiver", rx)):
+        state = (res.get("link_stats") or {}).get("link_state")
+        arm = (res.get("arm") or "").lower()
+        if state and ("licensed" in arm) and (("unlicensed" in arm) != (state == "unregistered")):
+            warnings.append(f"{side}: VARA reported a {state} link but the arm is {res.get('arm')}")
     mismatches = pair_mismatches(em, rx)
     result = {
         "sender_tag": em.get("tag"), "receiver_tag": rx.get("tag"),

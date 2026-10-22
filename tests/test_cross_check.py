@@ -66,6 +66,13 @@ check(cc.cross_check(sender("H1-1"), receiver("H1-1", infrastructure_fault=True)
 check(cc.cross_check(sender("H1-1"), receiver("H1-1", incomplete_evidence=["x"]))["outcome"] == "incomplete",
       "missing evidence is incomplete")
 
+vs = sender("H1-1", modem="vara", arm="VARA HF licensed")
+vr = receiver("H1-1", modem="vara", arm="VARA HF licensed", link_stats={"link_state": "unregistered"})
+check(any("unregistered link" in w for w in cc.cross_check(vs, vr)["warnings"]),
+      "a licensed arm on a link VARA reports as unregistered is flagged")
+vr["arm"] = vs["arm"] = "VARA HF unlicensed"
+check(cc.cross_check(vs, vr)["warnings"] == [], "an unlicensed arm on an unregistered link is consistent")
+
 # ---------------------------------------------------------------- a whole session
 root = Path(tempfile.mkdtemp(prefix="hf_arq_pair_"))
 

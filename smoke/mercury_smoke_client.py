@@ -25,6 +25,8 @@ RX_DISCONNECTED = r"^\s*DISCONNECTED\b"
 RX_BUFFER = r"^\s*BUFFER\s+(\d+)"
 RX_RESP = r"^\s*(OK|WRONG)\b"
 RX_SN = r"^\s*SN\s+(-?\d+(?:\.\d+)?)"
+# "BITRATE (3) 321 BPS" (Mercury) and "BITRATE (4)  88 bps TX" (VARA 4.9.0): level in brackets.
+RX_BITRATE = r"^\s*BITRATE\s+\((\d+)\)\s+(\d+)\s*bps(?:\s+(TX|RX))?"
 INFRASTRUCTURE_EVENTS = ("MISSING SOUNDCARD",)
 
 # Per-modem differences, kept here so that the procedure itself stays common.
@@ -39,7 +41,9 @@ MODEM_PROFILES = {
     },
     "vara": {
         "label": "VARA HF 4.9.0",
-        "require_ok": False,
+        # Confirmed on 2026-10-22 (E0-1, both PCs): VARA answers OK to MYCALL, P2P SESSION,
+        # CHAT OFF, BW500, LISTEN ON, CONNECT and DISCONNECT, like Mercury.
+        "require_ok": True,
         # VERSION (VARA >= 4.6.4) records the running version; P2P SESSION (>= 4.5.7)
         # selects the 4.6 s retry cycle documented for peer-to-peer links; CHAT OFF
         # (the default) keeps the timing optimised for data transfer, not chat.
@@ -146,11 +150,21 @@ def link_stats(lines: list[str]) -> dict:
     sn = [float(m.group(1)) for line in lines for m in [re.match(RX_SN, line)] if m]
     bitrates = list(dict.fromkeys(line.strip() for line in lines
                                   if line.strip().upper().startswith("BITRATE")))
+    levels = [{"level": int(m.group(1)), "bps": int(m.group(2)), "direction": m.group(3)}
+              for line in lines for m in [re.match(RX_BITRATE, line, re.I)] if m]
+    upper = [line.strip().upper() for line in lines]
+    # VARA reports whether the link runs in registered (licensed) mode.
+    link_state = ("unregistered" if "LINK UNREGISTERED" in upper
+                  else "registered" if "LINK REGISTERED" in upper else None)
     return {
         "sn_db": sn,
         "sn_min_db": min(sn) if sn else None,
         "sn_max_db": max(sn) if sn else None,
         "bitrate_lines": bitrates,
+        "bitrate_levels": levels,
+        "first_level": levels[0]["level"] if levels else None,
+        "link_state": link_state,
+        "busy_on_count": upper.count("BUSY ON"),
         "ptt_on_count": sum(1 for line in lines if line.strip().upper() == "PTT ON"),
         "infrastructure_events": [line for line in lines
                                   if any(e in line.upper() for e in INFRASTRUCTURE_EVENTS)],

@@ -72,9 +72,11 @@ at start and selects its sound card in its own window). Before each test the GUI
    password are never stored: the archived copy of `VARA.ini` has them replaced.
 2. requires that ports 8300 and 8301 belong to the process `VARA.exe`.
 
-After `MYCALL` the client sends `VERSION`, `P2P SESSION` and `CHAT OFF`. Until VARA's
-replies are confirmed in E0-2, a command with no `OK`/`WRONG` reply is recorded as a
-protocol warning; `WRONG` is a failure. `MISSING SOUNDCARD` is an infrastructure
+After `MYCALL` the client sends `VERSION`, `P2P SESSION` and `CHAT OFF`. The first
+real VARA run (E0-1, 2026-10-22) confirmed that VARA answers `OK` to every command
+except `VERSION`, so, as with Mercury, a missing reply or `WRONG` is a failure. VARA's
+link level (`BITRATE (4)`), its link mode (`LINK UNREGISTERED`) and `BUSY` events are
+recorded; a link mode that contradicts the arm is flagged in the cross-check. `MISSING SOUNDCARD` is an infrastructure
 fault. Callsigns must not use the SSIDs -T, -R, -X or -L, which VARA treats specially.
 
 ## Session cross-check

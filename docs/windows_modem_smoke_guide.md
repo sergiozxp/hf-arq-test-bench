@@ -135,7 +135,7 @@ repetitions.
 - "Ports … belong to VARA / mercury.exe": the other modem is running. Close it.
 - "INFRASTRUCTURE FAULT": the modem reported a sound card failure (VARA:
   `MISSING SOUNDCARD`). The attempt is not counted as a modem failure.
-- An orange receiver result with "protocol warning(s)" on VARA means a command got
-  no `OK`/`WRONG` reply. Keep the result: it documents how VARA answers.
+- If VARA is opened while Mercury still owns ports 8300/8301, VARA cannot take them.
+  Stop Mercury, close and reopen VARA, then press Check VARA.
 - If Mercury stops by itself, read `mercury_console.txt` and `mercury.log` in its
   session folder.
