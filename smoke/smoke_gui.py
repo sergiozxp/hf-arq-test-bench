@@ -95,7 +95,11 @@ class ModemSmokeWindow(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"HF-ARQ Modem Smoke {logic.APP_VERSION}")
-        self.geometry("1000x980")
+        try:
+            height = min(980, int(self.winfo_screenheight()) - 80)
+        except (TypeError, ValueError, tk.TclError):
+            height = 980
+        self.geometry(f"1000x{max(600, height)}")
         self.event_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
         self.process: subprocess.Popen | None = None
         self.worker: threading.Thread | None = None
@@ -275,23 +279,10 @@ class ModemSmokeWindow(tk.Tk):
         self.stop_button = ttk.Button(test, text="Stop", command=self._stop, state="disabled")
         self.stop_button.grid(row=2, column=2, sticky="w", **pad)
 
-        output = ttk.LabelFrame(self, text="4. Result")
-        output.pack(fill="both", expand=True, **pad)
-        self.summary = tk.Label(
-            output, text="Not run.", font=("Segoe UI", 12, "bold"), fg=COLORS["gray"],
-            wraplength=900, justify="left", anchor="w"
-        )
-        self.summary.pack(fill="x", padx=8, pady=6)
-        frame = ttk.Frame(output)
-        frame.pack(fill="both", expand=True, padx=8, pady=4)
-        self.log = tk.Text(frame, height=12, wrap="word", font=("Consolas", 9))
-        scrollbar = ttk.Scrollbar(frame, command=self.log.yview)
-        self.log.configure(yscrollcommand=scrollbar.set)
-        self.log.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
         tools = ttk.LabelFrame(self, text="Tools")
-        tools.pack(fill="x", **pad)
+        # Packed before the result area, at the bottom, so that it stays visible when
+        # the screen is shorter than the window (the result log shrinks instead).
+        tools.pack(side="bottom", fill="x", **pad)
         ttk.Button(tools, text="Open results folder", command=self._open_results).grid(
             row=0, column=0, padx=4, pady=6
         )
@@ -306,6 +297,21 @@ class ModemSmokeWindow(tk.Tk):
         ttk.Label(tools, text=f"Working directory: {HERE}", foreground="#555").grid(
             row=1, column=0, columnspan=4, sticky="w", padx=8
         )
+
+        output = ttk.LabelFrame(self, text="4. Result")
+        output.pack(fill="both", expand=True, **pad)
+        self.summary = tk.Label(
+            output, text="Not run.", font=("Segoe UI", 12, "bold"), fg=COLORS["gray"],
+            wraplength=900, justify="left", anchor="w"
+        )
+        self.summary.pack(fill="x", padx=8, pady=6)
+        frame = ttk.Frame(output)
+        frame.pack(fill="both", expand=True, padx=8, pady=4)
+        self.log = tk.Text(frame, height=8, wrap="word", font=("Consolas", 9))
+        scrollbar = ttk.Scrollbar(frame, command=self.log.yview)
+        self.log.configure(yscrollcommand=scrollbar.set)
+        self.log.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
     # ------------------------------------------------------------------ helpers
     def _form_values(self) -> dict:
