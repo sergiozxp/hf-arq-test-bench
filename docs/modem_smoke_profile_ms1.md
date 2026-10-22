@@ -12,23 +12,57 @@ application mailboxes, and application-layer timing.
 - Two Windows x64 PCs, called A and B.
 - One USB audio interface per PC.
 - Two line-level paths: A output to B input, and B output to A input.
-- Mercury 1.9.19 on both PCs with different callsigns.
+- Mercury 1.9.19 on both PCs, from the official Windows ZIP
+  `mercury-1.9.19-w64-e9f0072d.zip`
+  (SHA-256 `6b0e83185d5052d01e0d3041c9c6588023f9a0abe0196c62563dc33ce4467673`).
 
-Mercury command and data traffic stays on localhost. The two modems communicate
-only through the audio paths.
+Mercury command and data traffic is used only on the local PC. The two modems
+communicate only through the audio paths. Because Mercury 1.9.19 binds its TCP
+ports to all interfaces, both PCs are kept off the network during the test.
 
 ## Tests
 
 | Test | Purpose | Pass condition |
 |---|---|---|
 | E0-1 | Port 8301 framing; 16 B, 1 KiB and 10 KiB payloads | Exact bytes and SHA-256 at B |
-| E0-2 | Command order and peer negotiation | Expected CONNECTED event and bandwidth |
+| E0-2 | Bandwidth command order and peer negotiation: V1 before CONNECT, V2 after CONNECTED | Expected CONNECTED event and bandwidth |
 | E0-3 | Same-session ACK | B validates, sends ACK, and A verifies before disconnect |
 | H1 | Three independent 200 B transfers | Hash at B and complete archived evidence |
 
-E0-3 is specified for the common client but is not yet exposed by this alpha
-GUI. The current executable exposes E0-1, E0-2, and H1 only.
+E0-3 is specified for the common client but is not yet exposed by the alpha
+GUI. The 0.2.0-alpha.2 executable exposes E0-1, E0-2 V1 and V2, and H1.
 
-Each run preserves raw command and data captures, event log, configuration hash,
-environment snapshots and result.json. BUFFER 0 is ARQ evidence only. A
-cross-check passes only when B verifies the payload hash and it matches A.
+E0-2 V3 ("receiver listens first") was withdrawn in 0.2.0-alpha.2. Every test
+already starts the receiver first, so V3 executed the same steps as V1 and
+tested nothing new. A negative control (sender connects while the receiver is
+not listening) may be specified later as a new variant.
+
+H1 is run three times by hand, with repetition numbers 1, 2 and 3 on both PCs.
+
+## Mercury started by the GUI
+
+From 0.2.0-alpha.2 the GUI starts Mercury itself:
+
+1. It verifies the official ZIP hash, extracts only `mercury.exe` and its four
+   DLLs, and checks each against its hash inside the ZIP.
+2. It lists sound devices with `mercury.exe -x <wasapi|dsound> -z`, so the
+   selected id is the one Mercury opens.
+3. It writes a minimal `mercury.ini` (devices, sound system, ports 8300/8100,
+   PTT none) and starts `mercury.exe -C mercury.ini -L mercury.log`.
+4. Before each test it requires that ports 8300 and 8301 belong to that
+   Mercury process. A Mercury started outside the GUI can be used only after
+   the operator confirms, and the run records `launched_by_gui = false`.
+
+Facts confirmed in the Mercury 1.9.19 source (tag v1.9.19, commit e9f0072):
+`-i`/`-o` and the INI device keys accept the exact id printed by `-z`; the
+audio engine opens devices at 48 kHz; the ARQ TCP ports bind to all
+interfaces.
+
+## Evidence
+
+Each run preserves raw command and data captures, event log, configuration
+hash, environment snapshots and result.json. When the GUI started Mercury,
+each run also archives the generated `mercury.ini`, `mercury.log`, Mercury's
+console output, and the session record (command line, PID, devices, ZIP hash,
+version output). BUFFER 0 is ARQ evidence only. A cross-check passes only when
+B verifies the payload hash and it matches A.

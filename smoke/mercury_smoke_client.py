@@ -171,7 +171,7 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                 res["positive_buffer_before_zero"] = has_positive_buffer(
                     buffers_ns, t_w0, b0[1][0] if b0 else None)
                 if b0 is None:
-                    failures.append("B UFFER 0 was not observed after writing (timeout o cierre)")
+                    failures.append("BUFFER 0 was not observed after writing (timeout or socket closed)")
                 else:
                     res["arq_confirmed"] = True
                     res["t_transferencia_s"] = seconds_between(t_w0, b0[1][0])

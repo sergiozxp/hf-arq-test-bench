@@ -29,6 +29,8 @@ except ImportError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
 
 HEADER_LEN = 16
+# Child consoles stay hidden when the packaged GUI (which has no console) runs a tool.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # A non-UTF-8 console must not interrupt the reader thread.
 for _flujo in (sys.stdout, sys.stderr):
@@ -130,10 +132,36 @@ def ports_listening(salida: str, puertos) -> tuple[dict, dict]:
     return listening, lineas
 
 
+LISTENER_RE = re.compile(
+    r"^\s*TCP\s+(?P<local>\S+):(?P<port>\d+)\s+(?:0\.0\.0\.0:0|\[::\]:0|\*:\*)\s+\S+\s+(?P<pid>\d+)\s*$",
+    re.M | re.I,
+)
+
+
+def listeners_with_pid(salida: str, puertos) -> dict[str, list[dict]]:
+    """Return the listening sockets and owning PIDs for each port in netstat -ano output.
+
+    Like ports_listening, the match does not depend on the localized state text
+    ("LISTENING", "ESCUCHANDO", ...): a TCP line whose remote end is the wildcard
+    address is a listener.
+    """
+    wanted = {str(p) for p in puertos}
+    found: dict[str, list[dict]] = {p: [] for p in wanted}
+    for m in LISTENER_RE.finditer(salida):
+        if m.group("port") in wanted:
+            found[m.group("port")].append({"address": m.group("local"), "pid": int(m.group("pid"))})
+    return found
+
+
+def netstat_text() -> str:
+    """Return the output of netstat -ano, or an ERROR string."""
+    return _run_command(["netstat", "-ano"])
+
+
 def _run_command(comando: list[str], espera_s: int = 30) -> str:
     try:
         r = subprocess.run(comando, capture_output=True, text=True, errors="replace",
-                           timeout=espera_s)
+                           timeout=espera_s, creationflags=NO_WINDOW)
         return (r.stdout or "") + (("\nSTDERR: " + r.stderr) if r.stderr else "")
     except Exception as e:  # noqa: BLE001 - se registra el error tal cual
         return f"ERROR: {e!r}"
@@ -217,7 +245,7 @@ def capture_environment(cfg: dict, rlog: RunLog, puertos=()) -> dict:
             env["binaries"][nombre] = {"ruta": ruta, "error": repr(e)}
     try:
         salida = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
-                                errors="replace", timeout=30).stdout
+                                errors="replace", timeout=30, creationflags=NO_WINDOW).stdout
     except Exception as e:  # noqa: BLE001 - se registra el error tal cual
         salida = f"ERROR: {e!r}"
     (rlog.dir / "netstat_start.txt").write_text(salida, encoding="utf-8")

@@ -14,14 +14,29 @@ message-workflow behaviour.
 
 ## Status
 
-This is v0.2.0-alpha.1. The repository contains a Mercury-only smoke profile
-and the v5 protocol specification. The direct VARA adapter, common benchmark
-client and channel simulator are not implemented yet. No performance results
-are published, and the bundled smoke code has not been run against real Mercury
-or VARA installations.
+This is v0.2.0-alpha.2. The repository contains a Mercury-only smoke profile
+and the v5 protocol specification. The smoke GUI starts Mercury 1.9.19 from the
+verified official ZIP, lets the operator pick the sound devices Mercury lists,
+and checks that Mercury owns ports 8300 and 8301 before every test.
+
+The direct VARA adapter, common benchmark client and channel simulator are not
+implemented yet. No performance results are published. Continuous integration
+runs the real Mercury 1.9.19 on Windows without a sound card (null audio); the
+smoke test itself has not yet been completed between two real PCs.
 
 The historical v0.1.0 release remains unchanged. It used the earlier Mercury
 plus Pat scope and is superseded for new work.
+
+### Changes in 0.2.0-alpha.2
+
+- Start and stop Mercury from the GUI, from the official ZIP verified by SHA-256.
+- Audio device selector filled from Mercury's own device list, with a UCA222
+  suggestion and a warning when the device is the Windows default.
+- Port check before every test: 8300 and 8301 must belong to that Mercury.
+- The Mercury command line, generated mercury.ini, log and console output are
+  recorded with every test.
+- "Repeat (H1 only)" is now "H1 repetition number (1–3)", and E0-2 V3 was
+  withdrawn because it repeated V1.
 
 ## Current contents
 
@@ -29,7 +44,7 @@ plus Pat scope and is superseded for new work.
 - docs/modem_smoke_profile_ms1.md
 - docs/windows_modem_smoke_guide.md
 - docs/protocol_compatibility.md
-- smoke/: Mercury 1.9.19 preflight scripts and an optional Windows GUI
+- smoke/: Mercury 1.9.19 preflight scripts and the Windows GUI that starts Mercury
 
 ## Scope of the first benchmark table
 
