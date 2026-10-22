@@ -64,7 +64,16 @@ sys.modules.update({
 import smoke_gui
 
 window = smoke_gui.ModemSmokeWindow()
-assert window.test_name.get().startswith("E0-1")
+assert window.test_name.get() == smoke_gui.logic.SEQUENCE_TEST, "the full sequence is the default"
+assert window.repeat_mode is True
+window.test_name.set(smoke_gui.logic.H1_TEST)
+window._test_changed()
+assert window.repeat_mode is False and window.repeat.get() == 1
+window.test_name.set(smoke_gui.logic.SEQUENCE_TEST)
+window._test_changed()
+window.repeat.set(7)
+window._test_changed()
+assert window.repeat_mode is True and window.repeat.get() == 7, "the start step is kept"
 assert window.values["sound_system"].get() == "wasapi"
 assert not window.mercury.running()
 assert smoke_gui.device_labels([{"name": "X"}, {"name": "X"}, {"name": "Y"}]) == ["X", "X  [2]", "Y"]
@@ -90,4 +99,34 @@ window._show_vara({"registered": False, "exe_sha256": "ab" * 32,
                    "settings": {"input_device": "UCA222-A", "output_device": "UCA222-A"}},
                   [], ["untick updates"], {"ok": True, "needs_confirmation": False, "message": "ok"})
 window._show_vara(None, ["VARA.exe not found"], [], None)
+
+# The output of a full sequence: progress per test, a result per test, then the record.
+import json
+import tempfile
+temporary = Path(tempfile.mkdtemp(prefix="hf_arq_gui_"))
+for tag in ("E0-1_16B", "E0-1_1KiB"):
+    (temporary / "results" / tag).mkdir(parents=True)
+    (temporary / "results" / tag / "result.json").write_text(
+        json.dumps({"mode": "listen", "tag": tag, "delivered_intact": True}), encoding="utf-8")
+(temporary / "results" / "sequences").mkdir()
+(temporary / "results" / "sequences" / "seq.json").write_text(json.dumps(
+    {"mode": "listen", "steps": [{"tag": "E0-1_1KiB", "exit_code": 0}], "completed_steps": 2,
+     "planned_steps": 2, "outcome": "completed"}), encoding="utf-8")
+output = "\n".join([
+    "=== STEP 1/8: E0-1_16B (RECEIVER) ===", "Result saved to: results/E0-1_16B/result.json",
+    "=== STEP 2/8: E0-1_1KiB (RECEIVER) ===", "Result saved to: results/E0-1_1KiB/result.json",
+    "Sequence saved to: results/sequences/seq.json"])
+smoke_gui.HERE = temporary
+smoke_gui.process_command = lambda command: [sys.executable, "-c", f"print({output!r})"]
+window._run_commands([["smoke_sequence.py", "listen"]], {"start": "x", "log": str(temporary / "none.jsonl")})
+events = []
+while not window.event_queue.empty():
+    events.append(window.event_queue.get())
+kinds = [kind for kind, _ in events if kind != "log"]
+assert kinds == ["progress", "summary", "progress", "summary", "summary", "done"], kinds
+summaries = [json.loads(data) for kind, data in events if kind == "summary"]
+assert [s.get("tag") for s in summaries[:2]] == ["E0-1_16B", "E0-1_1KiB"], "each test is reported as it ends"
+assert summaries[2]["outcome"] == "completed", "the sequence record is the last summary"
+assert all((temporary / "results" / tag / "level_summary.json").is_file() for tag in ("E0-1_16B", "E0-1_1KiB")), \
+    "each test of the sequence gets its own level summary"
 print("ALL SIMULATED GUI TESTS PASSED")

@@ -31,6 +31,7 @@ import mercury_runtime as runtime
 import mercury_smoke_client  # noqa: F401  # included by PyInstaller
 import mercury_status
 import smoke_cross_check  # noqa: F401  # included by PyInstaller
+import smoke_sequence  # noqa: F401  # included by PyInstaller
 import vara_runtime as vara
 from smoke_common import listeners_with_pid, netstat_text, process_name
 
@@ -104,6 +105,7 @@ class ModemSmokeWindow(tk.Tk):
         self.process: subprocess.Popen | None = None
         self.worker: threading.Thread | None = None
         self.mercury = runtime.MercuryProcess()
+        self.repeat_mode: bool | None = None
         self.mercury_exe: str | None = None
         self.zip_check: dict | None = None
         self.devices: dict[str, list[dict]] = {"playback": [], "capture": []}
@@ -253,12 +255,13 @@ class ModemSmokeWindow(tk.Tk):
         test = ttk.LabelFrame(self, text="3. Smoke test (MS-1.0)")
         test.pack(fill="x", **pad)
         ttk.Label(test, text="Test:").grid(row=0, column=0, sticky="w", **pad)
-        self.test_name = tk.StringVar(value=next(iter(logic.MERCURY_TESTS)))
+        self.test_name = tk.StringVar(value=logic.SEQUENCE_TEST)
         ttk.Combobox(
-            test, textvariable=self.test_name, values=list(logic.MERCURY_TESTS),
+            test, textvariable=self.test_name, values=logic.TEST_CHOICES,
             width=62, state="readonly"
         ).grid(row=0, column=1, columnspan=3, sticky="w")
-        ttk.Label(test, text=logic.REPETITION_LABEL).grid(row=1, column=0, sticky="w", **pad)
+        self.repeat_label = ttk.Label(test, text=logic.REPETITION_LABEL)
+        self.repeat_label.grid(row=1, column=0, sticky="w", **pad)
         self.repeat = tk.IntVar(value=1)
         self.repeat.trace_add("write", lambda *_args: self._test_changed())
         self.repeat_box = ttk.Spinbox(test, from_=1, to=3, textvariable=self.repeat, width=4,
@@ -360,17 +363,32 @@ class ModemSmokeWindow(tk.Tk):
         if not hasattr(self, "selected_label"):
             return
         name = self.test_name.get()
-        enabled = logic.is_h1(name)
+        sequence = logic.is_sequence(name)
+        enabled = sequence or logic.is_h1(name)
+        limit = len(logic.SEQUENCE) if sequence else 3
+        if self.repeat_mode != sequence:
+            # The spin box is the H1 repetition, or the first step of the sequence.
+            self.repeat_mode = sequence
+            self.repeat_box.configure(to=limit)
+            self.repeat_label.configure(text=logic.SEQUENCE_LABEL if sequence else logic.REPETITION_LABEL)
+            self.repeat_hint.configure(text=logic.SEQUENCE_HINT if sequence else logic.REPETITION_HINT)
+            self.repeat.set(1)
         self.repeat_box.configure(state="readonly" if enabled else "disabled")
         try:
             repetition = int(self.repeat.get()) if enabled else 1
         except (tk.TclError, ValueError):
             repetition = 1
+        repetition = min(max(repetition, 1), limit)
         role = "SENDER (PC A)" if self.values["role"].get() == "A" else "RECEIVER (PC B)"
         modem = logic.MODEMS.get(self.values["modem"].get(), "?")
+        order = ""
+        if sequence:
+            order = (" Start PC B first. PC A waits "
+                     f"{logic.SEQUENCE_GAP_S} s between tests." if self.values["role"].get() == "A"
+                     else " Start PC B first; it re-arms after each test.")
         self.selected_label.configure(
             text=f"This PC will run: {logic.test_tag(name, repetition)} as {role} with {modem}. "
-                 "The other PC must show the same test.")
+                 "The other PC must show the same test." + order)
 
     def _modem_changed(self) -> None:
         if not hasattr(self, "mercury_frame"):
@@ -852,10 +870,15 @@ class ModemSmokeWindow(tk.Tk):
                              process_name=verdict.get("owner_name"))
         (HERE / "smoke_config.toml").write_text(logic.config_text(values, session, vara_info),
                                                 encoding="utf-8")
-        preset = logic.MERCURY_TESTS[self.test_name.get()]
-        repetition = self.repeat.get() if logic.is_h1(self.test_name.get()) else 1
-        commands = logic.mercury_commands(preset, values["role"], repetition)
-        tag = logic.test_tag(self.test_name.get(), repetition)
+        test_name = self.test_name.get()
+        sequence = logic.is_sequence(test_name)
+        repetition = self.repeat.get() if (sequence or logic.is_h1(test_name)) else 1
+        if sequence:
+            commands = logic.sequence_commands(values["role"], repetition)
+            tag = "Full sequence from step " + str(repetition)
+        else:
+            commands = logic.mercury_commands(logic.MERCURY_TESTS[test_name], values["role"], repetition)
+            tag = logic.test_tag(test_name, repetition)
         self.log.delete("1.0", "end")
         self._append_log(f"=== {tag} · {'SENDER (PC A)' if values['role'] == 'A' else 'RECEIVER (PC B)'}"
                          f" · {name}" + (f" · {logic.vara_arm(vara_info['registered'])}" if vara_info else "")
@@ -896,18 +919,37 @@ class ModemSmokeWindow(tk.Tk):
             for line in self.process.stdout:
                 line = line.rstrip("\n")
                 self.event_queue.put(("log", line))
+                step = logic.sequence_step_from_line(line)
+                if step:
+                    # A test of the full sequence starts: new level window and progress line.
+                    if window:
+                        window["start"] = mercury_status.utc_now()
+                    self.event_queue.put(("progress", f"Test {step[0]} of {step[1]}: {step[2]} "
+                                                      "running… Do not close this window."))
+                    continue
                 path = logic.result_path_from_line(line)
-                if path:
+                if not path:
+                    continue
+                result_path = HERE / path
+                if result_path.name == "result.json":
+                    # One test finished: its level summary and result now, not at the end.
+                    self._publish_result(result_path, window)
+                else:
                     latest_result = path
             exit_code = self.process.wait()
-            result_path = HERE / latest_result if latest_result else None
-            if window and result_path and result_path.is_file():
-                self._write_level_summary(window, result_path.parent)
-            if result_path and result_path.is_file():
-                self.event_queue.put(("summary", result_path.read_text(encoding="utf-8")))
+            report_path = HERE / latest_result if latest_result else None
+            if report_path and report_path.is_file():
+                self.event_queue.put(("summary", report_path.read_text(encoding="utf-8")))
             if exit_code != 0:
                 break
         self.event_queue.put(("done", ""))
+
+    def _publish_result(self, result_path: Path, window: dict | None) -> None:
+        if not result_path.is_file():
+            return
+        if window:
+            self._write_level_summary(window, result_path.parent)
+        self.event_queue.put(("summary", result_path.read_text(encoding="utf-8")))
 
     def _write_level_summary(self, window: dict, run_dir: Path) -> None:
         """Store Mercury's levels during the test beside its result.json."""
@@ -941,8 +983,11 @@ class ModemSmokeWindow(tk.Tk):
                     except ValueError:
                         text, color = "Could not parse the result file.", "red"
                     self._set_summary(text, color)
+                elif event == "progress":
+                    self.selected_label.configure(text="Now: " + data)
                 elif event == "done":
                     self._set_busy(False)
+                    self._test_changed()
                 elif event == "call":
                     function, args = data
                     function(*args)

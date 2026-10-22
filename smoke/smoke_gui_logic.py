@@ -174,14 +174,63 @@ REPETITION_HINT = "Run H1 three times: 1, then 2, then 3. Use the same number on
 
 TESTS = MERCURY_TESTS  # the same procedure for every modem
 
+# The whole MS-1.0 sequence in its fixed order (0.2.0-alpha.3): one RUN per PC.
+SEQUENCE_TEST = "ALL  Full sequence: the 8 tests in order (recommended)"
+SEQUENCE = [
+    ("E0-1  16-byte payload", 1),
+    ("E0-1  1 KiB payload", 1),
+    ("E0-1  10 KiB payload", 1),
+    ("E0-2  Variant V1: BW before connect", 1),
+    ("E0-2  Variant V2: BW after connect", 1),
+    (H1_TEST, 1),
+    (H1_TEST, 2),
+    (H1_TEST, 3),
+]
+SEQUENCE_GAP_S = 45
+TEST_CHOICES = [SEQUENCE_TEST, *MERCURY_TESTS]
+SEQUENCE_LABEL = "Start at step (1–8):"
+SEQUENCE_HINT = ("Normally 1. Use a later step only to finish a stopped sequence; "
+                 "use the same step on PC A and PC B.")
+
+
+def is_sequence(test_name: str) -> bool:
+    return test_name == SEQUENCE_TEST
+
 
 def is_h1(test_name: str) -> bool:
     return bool(MERCURY_TESTS.get(test_name, {}).get("repeat"))
 
 
 def test_tag(test_name: str, repetition: int) -> str:
+    if is_sequence(test_name):
+        return sequence_label(repetition)
     preset = MERCURY_TESTS[test_name]
     return preset["tag"].replace("{n}", str(repetition))
+
+
+def sequence_tags() -> list[str]:
+    return [test_tag(name, repetition) for name, repetition in SEQUENCE]
+
+
+def sequence_label(start: int = 1) -> str:
+    tags = sequence_tags()[start - 1:]
+    return f"the full sequence, {len(tags)} test(s): " + ", ".join(tags)
+
+
+def sequence_commands(role: str, start: int = 1, gap_s: float = SEQUENCE_GAP_S) -> list[list[str]]:
+    mode = "send" if role == "A" else "listen"
+    command = ["smoke_sequence.py", mode, "--from", str(start)]
+    if mode == "send":
+        command += ["--gap-s", f"{gap_s:g}"]
+    return [command]
+
+
+STEP_RE = re.compile(r"^=== STEP (\d+)/(\d+): (\S+)")
+
+
+def sequence_step_from_line(line: str) -> tuple[int, int, str] | None:
+    match = STEP_RE.match(line.strip())
+    return (int(match.group(1)), int(match.group(2)), match.group(3)) if match else None
 
 
 def mercury_commands(preset: dict, role: str, repeat: int) -> list[list[str]]:
@@ -201,6 +250,8 @@ def summarize(result: dict) -> tuple[str, str]:
         return "SCRIPT ERROR. Review the live log and result.json.", "red"
     if "pairs" in result and "counts" in result:
         return summarize_report(result)
+    if "planned_steps" in result and "steps" in result:
+        return summarize_sequence(result)
     tag = result.get("tag") or result.get("sender_tag") or ""
     prefix = f"[{tag}] " if tag else ""
     incomplete = result.get("incomplete_evidence") or []
@@ -243,6 +294,22 @@ def summarize(result: dict) -> tuple[str, str]:
     return f"STEP FAILED: {result.get('reason', failures)}", "red"
 
 
+def summarize_sequence(report: dict) -> tuple[str, str]:
+    """Summarise one PC's run of the full sequence."""
+    side = "SENDER" if report.get("mode") == "send" else "RECEIVER"
+    done, planned = report.get("completed_steps", 0), report.get("planned_steps", 0)
+    if report.get("outcome") == "completed":
+        note = (" Delivery is verified only by the cross-check." if side == "SENDER"
+                else " Every payload hash verified.")
+        return (f"SEQUENCE COMPLETED ({side}): {done} of {planned} test(s) passed on this PC.{note} "
+                "Next: Create results ZIP on PC B and cross-check it on PC A.",
+                "orange" if side == "SENDER" else "green")
+    steps = report.get("steps") or []
+    last = steps[-1]["tag"] if steps else "?"
+    return (f"SEQUENCE STOPPED at {last} ({side}): {done} of {planned} test(s) passed before it. "
+            "Keep both PCs' results; do not delete the failed run.", "red")
+
+
 def summarize_report(report: dict) -> tuple[str, str]:
     """Summarise a session cross-check report (all pairs of one session)."""
     counts = report.get("counts") or {}
@@ -261,7 +328,7 @@ def summarize_report(report: dict) -> tuple[str, str]:
     return text + ". See the table in the log.", "red" if bad else "orange"
 
 
-RESULT_PATH_RE = re.compile(r"(?:Result saved to:|Report saved to:|->)\s*(.+\.json)\s*$")
+RESULT_PATH_RE = re.compile(r"(?:Result saved to:|Report saved to:|Sequence saved to:|->)\s*(.+\.json)\s*$")
 
 
 def result_path_from_line(line: str) -> str | None:
@@ -272,6 +339,7 @@ def result_path_from_line(line: str) -> str | None:
 SCRIPTS = {
     "mercury_smoke_client.py": "mercury_smoke_client",
     "smoke_cross_check.py": "smoke_cross_check",
+    "smoke_sequence.py": "smoke_sequence",
 }
 
 

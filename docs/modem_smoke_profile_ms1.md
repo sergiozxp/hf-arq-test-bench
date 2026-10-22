@@ -40,7 +40,16 @@ already starts the receiver first, so V3 executed the same steps as V1 and
 tested nothing new. A negative control (sender connects while the receiver is
 not listening) may be specified later as a new variant.
 
-H1 is run three times by hand, with repetition numbers 1, 2 and 3 on both PCs.
+H1 is run three times, with repetition numbers 1, 2 and 3 on both PCs.
+
+From 0.2.0-alpha.3 the GUI can run the whole sequence with one RUN per PC
+(`smoke_sequence.py`): E0-1 16 B, 1 KiB, 10 KiB, E0-2 V1, V2, H1-1, H1-2, H1-3. The
+PCs share no network, so each follows the same fixed order: the receiver listens
+again as soon as a test ends, and the sender waits a fixed gap (45 s) before each
+following test. Each PC stops at its first failure, and the session cross-check
+still pairs each test by tag and time, so a desynchronised step cannot pass. Each
+test keeps its own run folder; the sequence record is written to
+`results/sequences/`.
 
 ## Mercury started by the GUI
 

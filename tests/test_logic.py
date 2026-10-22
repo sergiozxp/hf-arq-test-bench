@@ -122,4 +122,28 @@ check(logic.summarize(dict(report, unpaired=[], crossed_runs=[], outcome="passed
       "a clean session report is green")
 check(logic.result_path_from_line("Report saved to: C:/r/cross_checks/x/cross_check_report.json")
       == "C:/r/cross_checks/x/cross_check_report.json", "report path is parsed")
+
+# Full sequence (one RUN per PC).
+check(logic.sequence_tags() == ["E0-1_16B", "E0-1_1KiB", "E0-1_10KiB", "E0-2_V1", "E0-2_V2",
+                                "H1-1", "H1-2", "H1-3"], "the sequence follows the MS-1.0 order")
+check(logic.TEST_CHOICES[0] == logic.SEQUENCE_TEST and logic.is_sequence(logic.SEQUENCE_TEST)
+      and not logic.is_h1(logic.SEQUENCE_TEST), "the sequence is the first choice")
+check(logic.sequence_commands("B") == [["smoke_sequence.py", "listen", "--from", "1"]],
+      "PC B listens for the whole sequence")
+check(logic.sequence_commands("A", 6) == [["smoke_sequence.py", "send", "--from", "6", "--gap-s", "45"]],
+      "PC A sends from a chosen step with the gap")
+check("6 test(s)" in logic.test_tag(logic.SEQUENCE_TEST, 3) and "E0-1_10KiB" in logic.test_tag(logic.SEQUENCE_TEST, 3),
+      "the label names the remaining tests")
+check(logic.sequence_step_from_line("=== STEP 3/8: E0-1_10KiB (RECEIVER) ===") == (3, 8, "E0-1_10KiB"),
+      "step lines are parsed")
+check(logic.sequence_step_from_line("Result saved to: x.json") is None, "other lines are not steps")
+check(logic.result_path_from_line("Sequence saved to: results/sequences/sequence_send_x.json")
+      == "results/sequences/sequence_send_x.json", "sequence record path is parsed")
+done = {"mode": "listen", "steps": [{"tag": "H1-3", "exit_code": 0}], "completed_steps": 8,
+        "planned_steps": 8, "outcome": "completed"}
+check(logic.summarize(done)[1] == "green", "a completed receiver sequence is green")
+check(logic.summarize(dict(done, mode="send"))[1] == "orange", "a completed sender sequence waits for the cross-check")
+stopped = dict(done, completed_steps=5, outcome="stopped", steps=[{"tag": "H1-1", "exit_code": 1}])
+text, color = logic.summarize(stopped)
+check(color == "red" and "H1-1" in text and "5 of 8" in text, "a stopped sequence names the failed test")
 print("ALL LOGIC TESTS PASSED")

@@ -97,17 +97,39 @@ On VARA, every test also sends `VERSION`, `P2P SESSION` and `CHAT OFF` after
 
 ## 5. Run the tests
 
-1. Select the same test on both PCs. The blue line under the test names exactly
-   what this PC will run, for example "H1-2 as RECEIVER (PC B) with VARA HF".
+### Recommended: the full sequence
+
+1. On both PCs leave **Test** on "ALL  Full sequence: the 8 tests in order" and
+   **Start at step** on 1. The blue line lists the tests this PC will run.
+2. Press **RUN** on **PC B**. Wait until it shows `waiting_for_connection`.
+3. Press **RUN** on **PC A**.
+4. Leave both PCs alone. The blue line shows "Now: Test n of 8". PC B starts
+   listening for the next test as soon as one ends; PC A waits 45 s between tests,
+   so that PC B is listening again before the next CONNECT. Each test still gets
+   its own result folder and result line.
+5. At the end each PC shows "SEQUENCE COMPLETED" and writes a record to
+   `results\sequences\`.
+
+If a test fails, that PC stops ("SEQUENCE STOPPED at …"). The other PC then stops
+too, at the next test, because it finds no partner (the receiver's listen timeout,
+or the sender's connect timeout). Keep both results. To finish the remaining tests,
+choose the step after the last passed test in **Start at step** on both PCs, then
+RUN on PC B first and PC A second. **Stop** ends the whole sequence on that PC.
+
+Order: E0-1 (16 B, 1 KiB, 10 KiB), E0-2 V1 and V2, then H1 repetitions 1, 2, 3.
+
+### One test at a time
+
+1. Select the same single test on both PCs. The blue line under the test names
+   exactly what this PC will run, for example "H1-2 as RECEIVER (PC B) with VARA HF".
    Both PCs must show the same test.
 2. Press **RUN** on **PC B**. The GUI first checks that the selected modem owns
    ports 8300 and 8301.
 3. Wait until PC B shows `waiting_for_connection`.
 4. Press **RUN** on **PC A**.
 
-Order: E0-1 (16 B, 1 KiB, 10 KiB), E0-2 V1 and V2, then H1 three times
-(repetition 1, 2, 3, the same number on both PCs). Keep the modem running between
-repetitions.
+For H1, use repetition 1, 2, 3 (the same number on both PCs). Keep the modem
+running between tests.
 
 ## 6. Cross-check the session
 

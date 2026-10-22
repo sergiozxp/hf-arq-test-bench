@@ -83,4 +83,4 @@ def start_endpoint(name: str, peer: str, command_port: int, data_port: int) -> N
 
 start_endpoint("A", "B", 18300, 18301)
 start_endpoint("B", "A", 19300, 19301)
-time.sleep(120)
+time.sleep(900)

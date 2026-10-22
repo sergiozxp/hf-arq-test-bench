@@ -216,6 +216,49 @@ def main() -> int:
         report = json.loads(Path(report_path).read_text(encoding="utf-8"))
         check(report["counts"] == {"passed": 2} and report["outcome"] == "passed",
               "session cross-check pairs the Mercury and the VARA test")
+
+        # Third session: the full MS-1.0 sequence, one command per PC (B first, then A).
+        seq_configs = {}
+        for local, peer, command_port, data_port in (("A", "B", 18300, 18301), ("B", "A", 19300, 19301)):
+            (temporary / f"results_S{local}").mkdir()
+            path = temporary / f"config_seq_{local}.toml"
+            path.write_text(CONFIG.format(results=temporary / f"results_S{local}", command_port=command_port,
+                                          data_port=data_port, local=local, peer=peer), encoding="utf-8")
+            seq_configs[local] = path
+        receiver = subprocess.Popen(
+            launcher + ["smoke_sequence.py", "listen", "--config", str(seq_configs["B"])],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+        )
+        seq_lines: list[str] = []
+        reader = threading.Thread(target=lambda: [seq_lines.append(l) for l in receiver.stdout], daemon=True)
+        reader.start()
+        deadline = time.time() + 150
+        while time.time() < deadline and not any("waiting_for_connection" in l for l in seq_lines):
+            time.sleep(0.5)
+        check(any("waiting_for_connection" in l for l in seq_lines), "sequence receiver is listening")
+        seq_sender = subprocess.run(
+            launcher + ["smoke_sequence.py", "send", "--config", str(seq_configs["A"]), "--gap-s", "4"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+        )
+        receiver.wait(timeout=300)
+        reader.join(timeout=10)
+        steps = [l for l in seq_sender.stdout.splitlines() if l.startswith("=== STEP ")]
+        check(seq_sender.returncode == 0 and len(steps) == 8, "the sender runs the 8 tests in one command")
+        check([l.split()[3] for l in steps] == ["E0-1_16B", "E0-1_1KiB", "E0-1_10KiB", "E0-2_V1",
+                                                "E0-2_V2", "H1-1", "H1-2", "H1-3"], "in the MS-1.0 order")
+        check(receiver.returncode == 0 and sum("=== STEP " in l for l in seq_lines) == 8,
+              "the receiver re-arms after each test and receives all 8")
+        seq_reports = glob.glob(str(temporary / "results_SB" / "sequences" / "sequence_listen_*.json"))
+        check(len(seq_reports) == 1 and json.loads(Path(seq_reports[0]).read_text(encoding="utf-8"))["outcome"]
+              == "completed", "the receiver writes a sequence record")
+        pairing = subprocess.run(
+            launcher + ["smoke_cross_check.py", "--pair", str(temporary / "results_SA"),
+                        str(temporary / "results_SB")],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        report = json.loads(Path(pairing.stdout.split("Report saved to:")[1].strip()).read_text(encoding="utf-8"))
+        check(report["counts"] == {"passed": 8} and report["outcome"] == "passed" and not report["unpaired"],
+              "the session cross-check pairs all 8 tests of the sequence")
     finally:
         mock.kill()
     print("ALL LAUNCHER TESTS PASSED")
