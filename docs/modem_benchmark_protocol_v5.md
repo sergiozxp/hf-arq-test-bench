@@ -1,4 +1,4 @@
-# HF-ARQ Modem Benchmark Protocol v5.0
+# HF-ARQ Modem Benchmark Protocol v5.1
 
 ## Objective and scope
 
@@ -53,7 +53,7 @@ The direct bidirectional ACK must be verified for every adapter before Phase 1.
 
 ## Raw attempt record
 
-Every raw record includes protocol_version=5.0, run_id, UTC start, arm,
+Every raw record includes protocol_version (5.1), run_id, UTC start, arm,
 condition, load, trace/seed, modem binary hash, outcome, times, payload hashes,
 ACK fields, and failure reason. Outcome is success, failure, or interrupted.
 An interrupted attempt is retained and its replacement uses the paired trace.
@@ -66,3 +66,44 @@ Report total, success, failure, interrupted and excluded counts; success rate
 with Wilson interval; delivery-time median and p90 among successes; bootstrap
 intervals for median and p90; and Kaplan-Meier median only when success exceeds
 50 percent. p90 requires at least five successes.
+
+## Session settings common to all arms (added in v5.1)
+
+- **Callsigns.** Both PCs use plain numeric SSIDs of one licensed callsign, for
+  example XQ2CG-1 (PC A) and XQ2CG-2 (PC B), in every arm. VARA HF gives -T, -R,
+  -X and -L a special meaning (ChangeLog 4.5.8: -R is removed when a connection
+  ends; 4.9.0: special SSID extensions), so they are not used in any arm.
+- **VARA session commands.** After MYCALL, the client sends VERSION (recorded),
+  P2P SESSION (the 4.6 s retry cycle that VARA documents for peer-to-peer links,
+  ChangeLog 4.5.7) and CHAT OFF (the default, timing optimised for data rather than
+  chat, ChangeLog 4.5.5). Mercury has no equivalent commands.
+- **Licence state.** The VARA arm is derived from VARA.ini on each PC: any
+  registration code present means "licensed". The codes themselves are never
+  recorded; archived VARA.ini copies have them replaced. A pair whose two PCs are
+  in different licence states is rejected.
+- **Free VARA limits.** VARA HF 4.9.0 states that the unregistered version is
+  limited to a net rate of 175 bps (level 4) and has compression disabled, and that
+  registration removes both limits. The binary primary loads keep compression from
+  dominating the comparison.
+- **Infrastructure faults.** A MISSING SOUNDCARD event (VARA) or a sound card failure
+  reported by Mercury marks the attempt as an infrastructure fault, not a modem
+  failure. It is retained and handled as "interrupted".
+
+## Pairing and evidence (added in v5.1)
+
+- Sender and receiver results are paired by test tag and start time. A pair is
+  accepted only when the tag, bandwidth command and its timing, payload size, modem,
+  arm, protocol version and callsigns agree; otherwise it is an invalid pair and is
+  not counted, even when the payload hashes match (different tests may share a payload).
+- Runs left without a partner, and a sender and receiver that ran different tests at
+  the same time ("crossed runs"), are listed in the session report.
+- When Mercury is started by the bench, its status (TX peak in dBFS, received SNR,
+  sound card state) is logged twice per second and summarised per attempt. The TX peak
+  is Mercury's digital output level; the analog level is checked at the receiving PC.
+
+## Changes from v5.0
+
+- Common callsign convention, VARA session commands (P2P SESSION, CHAT OFF), licence
+  state rules and free-VARA limits as stated by VARA HF 4.9.0.
+- Strict pairing rules and session cross-check report.
+- Mercury level logging; infrastructure-fault outcome.

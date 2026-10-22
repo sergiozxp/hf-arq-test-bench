@@ -1,9 +1,8 @@
-# Windows Mercury Smoke Guide
+# Windows Modem Smoke Guide
 
-This guide runs MS-1.0 against real Mercury 1.9.19 installations with
-HF-ARQ Modem Smoke 0.2.0-alpha.2. It does not produce benchmark results and it
-does not require Pat, VarAC, VARA, a radio, PTT, or CAT control. The operator
-does not type any command: the GUI starts Mercury.
+This guide runs MS-1.0 with HF-ARQ Modem Smoke 0.2.0-alpha.3 against real
+Mercury 1.9.19 and VARA HF 4.9.0 installations. It does not produce benchmark
+results and it does not require Pat, VarAC, a radio, PTT, or CAT control.
 
 This alpha covers E0-1, E0-2 and H1. E0-3 (same-session ACK) is specified in
 MS-1.0 but is not available yet, so a smoke test run with this alpha is partial.
@@ -14,10 +13,12 @@ MS-1.0 but is not available yet, so a smoke test run with this alpha is partial.
 - One USB audio interface per PC (for example a Behringer UCA222) and two
   stereo RCA male-to-male cables.
 - `HF-ARQ-Modem-Smoke.exe` and `SHA256SUMS.txt` from the release page.
-- The official Mercury ZIP `mercury-1.9.19-w64-e9f0072d.zip` from
-  <https://github.com/Rhizomatica/mercury/releases/tag/v1.9.19>. Copy the same
-  file to both PCs. Do not unzip it and do not use the installer: the GUI
-  verifies the ZIP and extracts what it needs.
+- Mercury: the official ZIP `mercury-1.9.19-w64-e9f0072d.zip` from
+  <https://github.com/Rhizomatica/mercury/releases/tag/v1.9.19>, the same file on
+  both PCs. Do not unzip it and do not use the installer.
+- VARA: `VARA HF v4.9.0 setup.zip` from <https://downloads.winlink.org/VARA%20Products/>,
+  the same file on both PCs (SHA-256 `5ad7d75c…c991f48a`; the installer inside,
+  `b7d67fd9…c767e04bd`). Installed in `C:\VARA`.
 - A USB stick to carry result files between the PCs.
 
 ## 1. Hardware
@@ -35,84 +36,106 @@ the MONITOR switch to OFF.
 
 1. In Sound settings, rename the interface on both tabs (Playback and
    Recording) to `UCA222-A` on PC A and `UCA222-B` on PC B.
-2. Make another device the Windows default for playback and recording. The
-   interface must not be the default device, or Windows sounds reach the other PC.
+2. Make another device the Windows default for playback and recording.
 3. Disable "Listen to this device", audio enhancements, spatial audio and
-   sleep. Close every other audio program, VARA and any other Mercury.
-4. Disconnect the network during the test. Mercury listens on ports 8300 and
-   8301 on all network interfaces, and the two modems must be linked only by audio.
+   sleep. Close every other audio program.
+4. Set the same recording and playback format on both PCs (device Properties,
+   Advanced), 48 kHz, and record it. Mercury opens the devices at 48 kHz.
+5. Disconnect the network during the test. Both modems listen on all network
+   interfaces, and the two modems must be linked only by audio.
 
-Mercury opens the devices at 48 kHz, so set the interface to 48 kHz in
-Windows (device Properties, Advanced) and record that value.
+## 3. Station data (both PCs)
 
-## 3. Start Mercury from the GUI (both PCs)
+Start HF-ARQ Modem Smoke. In **1. Local station**:
 
-1. Start HF-ARQ Modem Smoke.
-2. In **1. Local station**, choose the role and enter the callsigns:
+| PC | This computer | Local callsign | Peer callsign | Bandwidth |
+|---|---|---|---|---|
+| A | PC A (sender) | XQ2CG-1 | XQ2CG-2 | BW500 |
+| B | PC B (receiver) | XQ2CG-2 | XQ2CG-1 | BW500 |
 
-   | PC | This computer | Local callsign | Peer callsign | Bandwidth |
-   |---|---|---|---|---|
-   | A | PC A (sender) | XQ2CG-A | XQ2CG-B | BW500 |
-   | B | PC B (receiver) | XQ2CG-B | XQ2CG-A | BW500 |
+Use the same callsigns for every modem. VARA treats -T, -R, -X and -L as special
+extensions, so the GUI refuses them when VARA is selected. Choose the **Modem**:
+Mercury 1.9.19 or VARA HF 4.9.0. Only one modem may run at a time: both use ports
+8300 and 8301.
 
-   Mercury does not need a callsign of its own: every test sends `MYCALL` and
-   the bandwidth on port 8300.
-3. In **2. Mercury 1.9.19**, press **Browse…** and select the Mercury ZIP. The
-   GUI checks its SHA-256 against the official release and extracts
-   `mercury.exe`. A ZIP that is not the official one is refused.
-4. Keep **Sound system** on `wasapi`. The GUI lists the devices that Mercury
-   itself sees. Press **Use suggestion** if it proposes the UCA222, or choose
-   the input and output by hand. An orange warning means the selected device
-   is still the Windows default.
-5. Press **Start Mercury**. The status line turns green when Mercury owns
-   ports 8300 and 8301. If Windows Firewall asks whether to allow
-   `mercury.exe` on networks, choose **Cancel**: the GUI talks to Mercury on
-   the same PC, which the firewall does not block.
+## 4a. Mercury: start it from the GUI
 
-The GUI writes the Mercury configuration and log into
-`results\mercury_sessions\<time>\`: `mercury.ini`, `mercury.log`,
-`mercury_console.txt`, `audio_devices.txt` and `session.json` (command line,
-PID, devices, ZIP hash and `mercury.exe -V` output). Every test records these
-files as evidence.
+1. In **2. Mercury 1.9.19**, press **Browse…** and select the Mercury ZIP. The
+   GUI checks its SHA-256 against the official release and extracts `mercury.exe`.
+2. Keep **Sound system** on `wasapi`, press **Use suggestion** (or choose the
+   input and output by hand).
+3. Press **Start Mercury**. The status line turns green when Mercury owns ports
+   8300 and 8301. If Windows Firewall asks about `mercury.exe`, choose **Cancel**.
+4. The **level meter** starts with Mercury: TX peak (dBFS), received SNR and the
+   sound card state, twice per second. Orange means the TX peak is above 80 % of
+   full scale; red means Mercury reports a sound card failure. The TX peak is
+   Mercury's digital level: also watch the recording level bar of the other PC
+   (Sound, Recording tab) while a test runs.
 
-If WASAPI does not work, choose `dsound`, detect the devices again and start
-Mercury again. Record that change.
+The GUI writes into `results\mercury_sessions\<time>\` the files `mercury.ini`,
+`mercury.log`, `mercury_console.txt`, `mercury_status.jsonl`, `audio_devices.txt`
+and `session.json`. Each test also gets a `level_summary.json`.
 
-## 4. Run the tests
+## 4b. VARA HF: open it yourself
 
-Every test follows the same order:
+1. Press **Stop Mercury** if Mercury is running.
+2. Open VARA. While it is unregistered it shows "Free Trial Version Restriction":
+   press **Continue to Evaluate**.
+3. In VARA, **Settings → SoundCard**: the interface of this PC as input and output,
+   **Channel L**. Record the Drive level.
+4. **Settings → VARA Setup**: TCP Command port 8300; tick **Accept 500 Hz
+   connections**; untick **Allow VARA check for updates via internet**; KISS off.
+   For the unlicensed arm, leave every Registration Key empty on **both** PCs; for
+   the licensed arm, both PCs registered.
+5. In the GUI, select **VARA HF 4.9.0** as the modem and press **Check VARA**. It
+   records the SHA-256 of `VARA.exe`, reads `VARA.ini` (sound devices, port, licence
+   state) and checks that VARA owns ports 8300 and 8301. The registration codes are
+   never stored: every archived copy of `VARA.ini` has them replaced.
 
-1. Select the same test on both PCs.
-2. Press **RUN** on **PC B**. Before every test the GUI checks that the
-   Mercury it started owns ports 8300 and 8301; otherwise it refuses to run.
+On VARA, every test also sends `VERSION`, `P2P SESSION` and `CHAT OFF` after
+`MYCALL` (protocol v5.1).
+
+## 5. Run the tests
+
+1. Select the same test on both PCs. The blue line under the test names exactly
+   what this PC will run, for example "H1-2 as RECEIVER (PC B) with VARA HF".
+   Both PCs must show the same test.
+2. Press **RUN** on **PC B**. The GUI first checks that the selected modem owns
+   ports 8300 and 8301.
 3. Wait until PC B shows `waiting_for_connection`.
 4. Press **RUN** on **PC A**.
-5. Read the result: green passed, orange to review, red failed.
 
-Order of the tests:
+Order: E0-1 (16 B, 1 KiB, 10 KiB), E0-2 V1 and V2, then H1 three times
+(repetition 1, 2, 3, the same number on both PCs). Keep the modem running between
+repetitions.
 
-1. E0-1 16-byte, 1 KiB and 10 KiB payloads.
-2. E0-2 V1 (bandwidth before connect) and V2 (bandwidth after connect).
-   Record the complete `CONNECTED` line of each.
-3. Carry the results of B to A and use **Cross-check A and B results**. A test
-   passes only when B verified the SHA-256 and it matches A. `BUFFER 0` on A is
-   not proof of delivery.
-4. With E0-1 and E0-2 passed, run H1 three times. Set **H1 repetition number**
-   to 1, then 2, then 3, with the same number on both PCs, and cross-check each.
-   Keep Mercury running between repetitions.
+## 6. Cross-check the session
 
-## 5. Finish
+1. On PC B, press **Create results ZIP** and carry the ZIP to PC A.
+2. On PC A, press **Cross-check with the other PC's ZIP…** and choose that ZIP.
+   No unzipping is needed.
+3. The GUI pairs every test of A with the test of B that has the same name and
+   started closest in time, and cross-checks each pair. A pair of two different
+   tests is rejected even if the hashes match. Runs without a partner and crossed
+   runs (the PCs ran different tests at the same time) are listed.
+4. The report is saved in `results\cross_checks\<time>\` as
+   `cross_check_report.json` and `cross_check_report.csv`.
 
-1. Press **Stop Mercury** on both PCs.
+**Cross-check two result files…** still compares one pair chosen by hand.
+
+## 7. Finish
+
+1. Stop the modem on both PCs (Stop Mercury, or close VARA).
 2. Use **Create results ZIP** on both PCs and keep both archives.
 3. Record the smoke test as partial: E0-3 is pending.
 
 ## If something fails
 
 - Do not repeat a failed test blindly. Keep both result archives and review them.
-- If Mercury stops by itself, the status line turns red. Read
-  `mercury_console.txt` and `mercury.log` in its session folder.
-- "Ports already in use" means another program owns 8300, 8301 or 8100:
-  close VARA, `mercury-ui.exe` or another Mercury.
-- Mercury started outside the GUI can still be used: the GUI asks for
-  confirmation and records that its command line and log were not captured.
+- "Ports … belong to VARA / mercury.exe": the other modem is running. Close it.
+- "INFRASTRUCTURE FAULT": the modem reported a sound card failure (VARA:
+  `MISSING SOUNDCARD`). The attempt is not counted as a modem failure.
+- An orange receiver result with "protocol warning(s)" on VARA means a command got
+  no `OK`/`WRONG` reply. Keep the result: it documents how VARA answers.
+- If Mercury stops by itself, read `mercury_console.txt` and `mercury.log` in its
+  session folder.

@@ -18,7 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "smoke"))
 import mercury_runtime as runtime
-from smoke_common import listeners_with_pid, netstat_text
+import mercury_status
+from smoke_common import listeners_with_pid, netstat_text, process_name
 
 
 def check(condition: bool, message: str) -> None:
@@ -69,6 +70,7 @@ def main() -> int:
     pid = process.start([str(exe), "-C", str(ini), "-L", str(session / "mercury.log")],
                         session, session / "mercury_console.txt")
     verdict = None
+    monitor = None
     try:
         deadline = time.monotonic() + 40
         while time.monotonic() < deadline and process.running():
@@ -76,11 +78,23 @@ def main() -> int:
             if verdict["ok"]:
                 break
             time.sleep(1)
+        check(verdict is not None and verdict["ok"], f"Mercury (PID {pid}) owns 8300 and 8301")
+        check((process_name(pid) or "").lower() == "mercury.exe", "the port owner is identified as mercury.exe")
+        monitor = mercury_status.StatusMonitor(runtime.UI_PORT, log_path=session / "status.jsonl").start()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and monitor.latest is None:
+            time.sleep(0.5)
+        print("status:", monitor.latest, "error:", monitor.error)
+        check(monitor.latest is not None, "Mercury's status WebSocket delivers status messages")
+        check(isinstance(monitor.latest.get("audio_ok"), bool)
+              and isinstance(monitor.latest.get("tx_peak_dbfs"), (int, float)),
+              "status carries the meter fields (audio_ok, tx_peak_dbfs)")
     finally:
+        if monitor:
+            monitor.stop()
         code = process.stop()
         print("--- mercury_console.txt ---")
         print((session / "mercury_console.txt").read_text(errors="replace")[-3000:])
-    check(verdict is not None and verdict["ok"], f"Mercury (PID {pid}) owns 8300 and 8301")
     print(f"Mercury stopped with code {code}; listeners: {verdict['listeners']}")
     print("REAL MERCURY TESTS PASSED")
     return 0

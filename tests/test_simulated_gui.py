@@ -42,10 +42,12 @@ class Root(Widget):
 
 tk = types.ModuleType("tkinter")
 tk.Tk, tk.StringVar, tk.IntVar = Root, Variable, Variable
+tk.TclError = RuntimeError
 for name in ("Text", "Label", "Button"):
     setattr(tk, name, Widget)
 ttk = types.ModuleType("tkinter.ttk")
-for name in ("LabelFrame", "Label", "Radiobutton", "Entry", "Combobox", "Spinbox", "Button", "Frame", "Scrollbar"):
+for name in ("LabelFrame", "Label", "Radiobutton", "Entry", "Combobox", "Spinbox", "Button", "Frame",
+             "Scrollbar", "Progressbar"):
     setattr(ttk, name, Widget)
 dialogs = types.ModuleType("tkinter.filedialog")
 messages = types.ModuleType("tkinter.messagebox")
@@ -74,4 +76,18 @@ smoke_gui.PACKAGED = True
 assert smoke_gui.process_command(["mercury_smoke_client.py", "send"]) == [
     sys.executable, "--script", "mercury_smoke_client.py", "send"
 ]
+
+# Modem switching, the level meter and the VARA status run without errors.
+window.values["modem"].set("vara")
+window._modem_changed()
+window.values["modem"].set("mercury")
+window._modem_changed()
+window._show_status({"tx_peak_dbfs": -6.0, "snr": 25.0, "sync": True, "direction": "rx",
+                     "audio_ok": True, "bitrate": 321})
+window._show_status({"tx_peak_dbfs": -0.5, "snr": None, "sync": False, "direction": "tx",
+                     "audio_ok": False, "audio_error": "device lost"})
+window._show_vara({"registered": False, "exe_sha256": "ab" * 32,
+                   "settings": {"input_device": "UCA222-A", "output_device": "UCA222-A"}},
+                  [], ["untick updates"], {"ok": True, "needs_confirmation": False, "message": "ok"})
+window._show_vara(None, ["VARA.exe not found"], [], None)
 print("ALL SIMULATED GUI TESTS PASSED")

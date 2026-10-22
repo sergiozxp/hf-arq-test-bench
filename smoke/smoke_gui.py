@@ -1,10 +1,11 @@
 """HF-ARQ Modem Smoke GUI.
 
-This alpha runs the Mercury 1.9.19 smoke profile (MS-1.0) only. The GUI can
-start Mercury from the official release ZIP with the sound devices the operator
-selects, checks that Mercury owns ports 8300 and 8301 before every test, and
-launches the same Python scripts that are available from a command prompt.
-The scripts, not the GUI, decide whether a test passed.
+Runs the smoke profile MS-1.0 against Mercury 1.9.19 or VARA HF 4.9.0. The GUI
+starts Mercury from the official release ZIP (VARA is opened by the operator),
+shows Mercury's live levels, checks that the selected modem owns ports 8300 and
+8301 before every test, launches the same Python scripts that are available
+from a command prompt, and cross-checks a whole session against the other PC's
+results ZIP. The scripts, not the GUI, decide whether a test passed.
 """
 from __future__ import annotations
 
@@ -28,8 +29,10 @@ from tkinter import filedialog, messagebox, ttk
 
 import mercury_runtime as runtime
 import mercury_smoke_client  # noqa: F401  # included by PyInstaller
+import mercury_status
 import smoke_cross_check  # noqa: F401  # included by PyInstaller
-from smoke_common import listeners_with_pid, netstat_text
+import vara_runtime as vara
+from smoke_common import listeners_with_pid, netstat_text, process_name
 
 PACKAGED = bool(getattr(sys, "frozen", False))
 COLORS = {"green": "#1b7f3b", "red": "#b3261e", "orange": "#b26a00", "gray": "#555555"}
@@ -91,8 +94,8 @@ def device_labels(devices: list[dict]) -> list[str]:
 class ModemSmokeWindow(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"HF-ARQ Modem Smoke {logic.APP_VERSION} — Mercury {runtime.MERCURY_VERSION}")
-        self.geometry("980x900")
+        self.title(f"HF-ARQ Modem Smoke {logic.APP_VERSION}")
+        self.geometry("1000x980")
         self.event_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
         self.process: subprocess.Popen | None = None
         self.worker: threading.Thread | None = None
@@ -103,17 +106,22 @@ class ModemSmokeWindow(tk.Tk):
         self.labels: dict[str, list[str]] = {"playback": [], "capture": []}
         self.session: dict | None = None
         self.session_reported_end = False
+        self.vara_info: dict | None = None
+        self.status_monitor: mercury_status.StatusMonitor | None = None
+        self.test_window: dict | None = None
         self._suggested: tuple[dict | None, dict | None] = (None, None)
         self.values = {
             key: tk.StringVar()
             for key in (
                 "role", "mycall", "peer_call", "bw", "mercury_zip",
-                "sound_system", "input_id", "output_id",
+                "sound_system", "input_id", "output_id", "modem", "vara_exe",
             )
         }
         self.values["role"].set("A")
         self.values["bw"].set("BW500")
         self.values["sound_system"].set("wasapi")
+        self.values["modem"].set("mercury")
+        self.values["vara_exe"].set(str(vara.DEFAULT_EXE))
         self.input_choice = tk.StringVar()
         self.output_choice = tk.StringVar()
         self._load_settings()
@@ -121,6 +129,7 @@ class ModemSmokeWindow(tk.Tk):
         self.after(100, self._drain_queue)
         self.after(2000, self._watch_mercury)
         self.protocol("WM_DELETE_WINDOW", self._close)
+        self._modem_changed()
         if self.values["mercury_zip"].get():
             self._prepare_zip(quiet=True)
 
@@ -145,9 +154,17 @@ class ModemSmokeWindow(tk.Tk):
             station, textvariable=self.values["bw"], values=logic.BANDWIDTHS,
             width=10, state="readonly"
         ).grid(row=2, column=1, sticky="w")
+        ttk.Label(station, text="Modem:").grid(row=3, column=0, sticky="w", **pad)
+        for column, (key, label) in enumerate(logic.MODEMS.items(), start=1):
+            ttk.Radiobutton(station, text=label, variable=self.values["modem"], value=key,
+                            command=self._modem_changed).grid(row=3, column=column, sticky="w")
+        for key in ("role", "mycall", "peer_call"):
+            self.values[key].trace_add("write", lambda *_args: self._test_changed())
 
-        modem = ttk.LabelFrame(self, text=f"2. Mercury {runtime.MERCURY_VERSION}")
-        modem.pack(fill="x", **pad)
+        self.modem_area = ttk.Frame(self)
+        self.modem_area.pack(fill="x")
+        modem = ttk.LabelFrame(self.modem_area, text=f"2. Mercury {runtime.MERCURY_VERSION}")
+        self.mercury_frame = modem
         ttk.Label(modem, text="Official Mercury ZIP:").grid(row=0, column=0, sticky="w", **pad)
         ttk.Entry(modem, textvariable=self.values["mercury_zip"], width=62).grid(
             row=0, column=1, columnspan=3, sticky="we"
@@ -200,7 +217,36 @@ class ModemSmokeWindow(tk.Tk):
                                        wraplength=880)
         self.mercury_status.grid(row=8, column=0, columnspan=5, sticky="w", padx=8, pady=(0, 6))
 
-        test = ttk.LabelFrame(self, text=f"3. Mercury {runtime.MERCURY_VERSION} smoke test")
+        ttk.Label(modem, text="Level meter (Mercury):").grid(row=9, column=0, sticky="w", **pad)
+        self.peak_bar = ttk.Progressbar(modem, orient="horizontal", length=260, maximum=40)
+        self.peak_bar.grid(row=9, column=1, sticky="w")
+        self.meter_label = tk.Label(modem, text="Not connected. The meter starts with Mercury.",
+                                    fg=COLORS["gray"], anchor="w", justify="left")
+        self.meter_label.grid(row=9, column=2, columnspan=3, sticky="w", padx=8)
+        self.meter_detail = tk.Label(modem, text="", fg=COLORS["gray"], anchor="w", justify="left",
+                                     wraplength=880)
+        self.meter_detail.grid(row=10, column=0, columnspan=5, sticky="w", padx=8, pady=(0, 6))
+
+        vframe = ttk.LabelFrame(self.modem_area, text=f"2. VARA HF {vara.VARA_VERSION}")
+        self.vara_frame = vframe
+        ttk.Label(vframe, text="VARA.exe:").grid(row=0, column=0, sticky="w", **pad)
+        ttk.Entry(vframe, textvariable=self.values["vara_exe"], width=62).grid(
+            row=0, column=1, columnspan=3, sticky="we")
+        ttk.Button(vframe, text="Browse…", command=self._browse_vara).grid(row=0, column=4, **pad)
+        ttk.Button(vframe, text="Check VARA", command=self._check_vara).grid(
+            row=1, column=0, sticky="w", **pad)
+        ttk.Button(vframe, text="Check ports 8300/8301", command=self._check_ports).grid(
+            row=1, column=1, sticky="w", **pad)
+        self.vara_status = tk.Label(
+            vframe, text="Open VARA (Continue to Evaluate if it asks), then press Check VARA.",
+            fg=COLORS["gray"], font=("Segoe UI", 10, "bold"), anchor="w", justify="left",
+            wraplength=880)
+        self.vara_status.grid(row=2, column=0, columnspan=5, sticky="w", padx=8)
+        self.vara_detail = tk.Label(vframe, text="", fg=COLORS["orange"], anchor="w", justify="left",
+                                    wraplength=880)
+        self.vara_detail.grid(row=3, column=0, columnspan=5, sticky="w", padx=8, pady=(0, 6))
+
+        test = ttk.LabelFrame(self, text="3. Smoke test (MS-1.0)")
         test.pack(fill="x", **pad)
         ttk.Label(test, text="Test:").grid(row=0, column=0, sticky="w", **pad)
         self.test_name = tk.StringVar(value=next(iter(logic.MERCURY_TESTS)))
@@ -210,11 +256,15 @@ class ModemSmokeWindow(tk.Tk):
         ).grid(row=0, column=1, columnspan=3, sticky="w")
         ttk.Label(test, text=logic.REPETITION_LABEL).grid(row=1, column=0, sticky="w", **pad)
         self.repeat = tk.IntVar(value=1)
+        self.repeat.trace_add("write", lambda *_args: self._test_changed())
         self.repeat_box = ttk.Spinbox(test, from_=1, to=3, textvariable=self.repeat, width=4,
                                       state="readonly")
         self.repeat_box.grid(row=1, column=1, sticky="w")
         self.repeat_hint = tk.Label(test, text=logic.REPETITION_HINT, fg=COLORS["gray"], anchor="w")
         self.repeat_hint.grid(row=1, column=2, columnspan=3, sticky="w", padx=8)
+        self.selected_label = tk.Label(test, text="", font=("Segoe UI", 13, "bold"),
+                                       fg="#1f5fbf", anchor="w", justify="left", wraplength=900)
+        self.selected_label.grid(row=3, column=0, columnspan=5, sticky="w", padx=8, pady=(2, 6))
         self.test_name.trace_add("write", lambda *_args: self._test_changed())
         self._test_changed()
         self.run_button = tk.Button(
@@ -248,8 +298,10 @@ class ModemSmokeWindow(tk.Tk):
         ttk.Button(tools, text="Create results ZIP", command=self._zip_results).grid(
             row=0, column=1, padx=4, pady=6
         )
-        ttk.Button(tools, text="Cross-check A and B results…", command=self._cross_check).grid(
-            row=0, column=2, padx=4, pady=6
+        ttk.Button(tools, text="Cross-check with the other PC's ZIP…",
+                   command=self._cross_check_zip).grid(row=0, column=2, padx=4, pady=6)
+        ttk.Button(tools, text="Cross-check two result files…", command=self._cross_check).grid(
+            row=0, column=3, padx=4, pady=6
         )
         ttk.Label(tools, text=f"Working directory: {HERE}", foreground="#555").grid(
             row=1, column=0, columnspan=4, sticky="w", padx=8
@@ -299,8 +351,30 @@ class ModemSmokeWindow(tk.Tk):
         return bool(self.worker and self.worker.is_alive())
 
     def _test_changed(self) -> None:
-        enabled = logic.is_h1(self.test_name.get())
+        if not hasattr(self, "selected_label"):
+            return
+        name = self.test_name.get()
+        enabled = logic.is_h1(name)
         self.repeat_box.configure(state="readonly" if enabled else "disabled")
+        try:
+            repetition = int(self.repeat.get()) if enabled else 1
+        except (tk.TclError, ValueError):
+            repetition = 1
+        role = "SENDER (PC A)" if self.values["role"].get() == "A" else "RECEIVER (PC B)"
+        modem = logic.MODEMS.get(self.values["modem"].get(), "?")
+        self.selected_label.configure(
+            text=f"This PC will run: {logic.test_tag(name, repetition)} as {role} with {modem}. "
+                 "The other PC must show the same test.")
+
+    def _modem_changed(self) -> None:
+        if not hasattr(self, "mercury_frame"):
+            return
+        mercury = self.values["modem"].get() == "mercury"
+        self.mercury_frame.pack_forget()
+        self.vara_frame.pack_forget()
+        (self.mercury_frame if mercury else self.vara_frame).pack(fill="x", padx=8, pady=4)
+        self._test_changed()
+        self._save_settings()
 
     # ------------------------------------------------------------------ Mercury ZIP
     def _browse_zip(self) -> None:
@@ -478,7 +552,7 @@ class ModemSmokeWindow(tk.Tk):
             if any(state != "ok" for state in runtime.extracted_state(MERCURY_DIR).values()):
                 raise runtime.MercuryError("The extracted Mercury files changed. Select the ZIP again.")
             busy = runtime.busy_ports(listeners_with_pid(
-                netstat_text(), (*PORTS, runtime.BROADCAST_PORT)))
+                netstat_text(), (*PORTS, runtime.BROADCAST_PORT, runtime.UI_PORT)))
             if busy:
                 raise runtime.MercuryError(
                     f"Ports already in use: {busy} (port: PIDs). Close the other modem program "
@@ -514,6 +588,8 @@ class ModemSmokeWindow(tk.Tk):
             "started_utc": runtime.utc_now(), "session_dir": str(session_dir),
             "exe": exe, "ini": str(ini), "log": str(log), "console": str(console),
             "ini_sha256": runtime.sha256_file(ini), "app_version": logic.APP_VERSION,
+            "ui_port": runtime.UI_PORT,
+            "status_log": str(session_dir / "mercury_status.jsonl"),
         }
         runtime.write_json(session_dir / "session.json", session)
         self._call(self._mercury_started, session)
@@ -551,6 +627,7 @@ class ModemSmokeWindow(tk.Tk):
             note = (" It listens on all network interfaces: keep this PC off the network "
                     "during the test." if verdict["all_interfaces"] else "")
             self._set_label(self.mercury_status, verdict["message"] + note, "green")
+            self._start_monitor()
         else:
             message = verdict["message"] if verdict else "Ports were not checked."
             self._set_label(self.mercury_status,
@@ -561,6 +638,7 @@ class ModemSmokeWindow(tk.Tk):
         if self.session and not self.mercury.running() and not self.session_reported_end:
             code = self.mercury.exit_code()
             self.mercury.stop()
+            self._stop_monitor()
             self._record_session_end("exited", code)
             self.start_mercury_button.configure(state="normal")
             self.stop_mercury_button.configure(state="disabled")
@@ -569,8 +647,50 @@ class ModemSmokeWindow(tk.Tk):
                 f"Mercury stopped unexpectedly (exit code {code}). See mercury_console.txt and "
                 f"mercury.log in {self.session['session_dir']}.", "red")
             self._append_log(f"Mercury exited with code {code}.")
+        monitor = self.status_monitor
+        if monitor and not monitor.connected:
+            self._set_label(self.meter_label, "Waiting for Mercury's status… "
+                            + (f"({monitor.error})" if monitor.error else ""), "gray")
         self.after(2000, self._watch_mercury)
 
+    # ------------------------------------------------------------------ level meter
+    def _start_monitor(self) -> None:
+        self._stop_monitor()
+        if not self.session:
+            return
+        self.status_monitor = mercury_status.StatusMonitor(
+            self.session.get("ui_port", runtime.UI_PORT), log_path=self.session.get("status_log"),
+            on_status=lambda status: self._call(self._show_status, status)).start()
+
+    def _stop_monitor(self) -> None:
+        if self.status_monitor:
+            self.status_monitor.stop()
+            self.status_monitor = None
+        self.peak_bar.configure(value=0)
+        self._set_label(self.meter_label, "Not connected. The meter starts with Mercury.", "gray")
+        self.meter_detail.configure(text="")
+
+    def _show_status(self, status: dict) -> None:
+        peak = status.get("tx_peak_dbfs")
+        has_peak = isinstance(peak, (int, float)) and peak > -120
+        self.peak_bar.configure(value=max(0.0, min(40.0, peak + 40.0)) if has_peak else 0)
+        snr = status.get("snr")
+        parts = [f"TX peak {peak:.1f} dBFS" if has_peak else "TX peak —",
+                 f"RX SNR {snr:.1f} dB" if isinstance(snr, (int, float)) and status.get("sync") else "RX SNR —",
+                 "audio OK" if status.get("audio_ok") is not False else "AUDIO FAILED",
+                 (status.get("direction") or "").upper()]
+        if status.get("bitrate"):
+            parts.append(f"{status['bitrate']} bps")
+        color = "green"
+        detail = ""
+        if status.get("audio_ok") is False:
+            color, detail = "red", f"Mercury reports a sound card failure: {status.get('audio_error')}"
+        elif has_peak and peak > mercury_status.PEAK_LIMIT_DBFS:
+            color = "orange"
+            detail = (f"TX peak above {mercury_status.PEAK_LIMIT_DBFS} dBFS (80 % of full scale). "
+                      "This is Mercury's digital level; check the level on the other PC too.")
+        self._set_label(self.meter_label, " · ".join(p for p in parts if p), color)
+        self.meter_detail.configure(text=detail, fg=COLORS.get(color, COLORS["gray"]))
     def _record_session_end(self, reason: str, code) -> None:
         if not self.session or self.session_reported_end:
             return
@@ -588,6 +708,7 @@ class ModemSmokeWindow(tk.Tk):
                 "Mercury", "A test is running. Stopping Mercury will make it fail. Stop anyway?"):
             return
         code = self.mercury.stop()
+        self._stop_monitor()
         self._record_session_end("stopped_by_operator", code)
         self.start_mercury_button.configure(state="normal")
         self.stop_mercury_button.configure(state="disabled")
@@ -595,17 +716,84 @@ class ModemSmokeWindow(tk.Tk):
         self._append_log("Mercury stopped by the operator.")
 
     def _check_ports(self) -> None:
+        modem = self.values["modem"].get()
         pid = self.mercury.pid if self.mercury.running() else None
-        self._in_background(self._check_ports_worker, pid)
+        self._in_background(self._check_ports_worker, modem, pid)
 
-    def _check_ports_worker(self, pid: int | None) -> None:
-        verdict = runtime.preflight(listeners_with_pid(netstat_text(), PORTS), pid)
-        self._call(self._show_port_check, verdict)
+    def _port_verdict(self, modem: str, pid: int | None) -> dict:
+        """Who owns 8300/8301, judged for the selected modem (runs in a worker thread)."""
+        listeners = listeners_with_pid(netstat_text(), PORTS)
+        if modem == "vara":
+            verdict = runtime.preflight(listeners, None)
+            if pid is not None:
+                return dict(verdict, ok=False, needs_confirmation=False,
+                            message="Mercury started from this window is running. Press Stop "
+                                    "Mercury, then open VARA.")
+            owner = process_name(verdict["owner_pids"][0]) if verdict["owner_pids"] else None
+            return vara.owner_verdict(verdict, owner)
+        verdict = runtime.preflight(listeners, pid)
+        if verdict["ok"] and pid is None and verdict["owner_pids"]:
+            owner = process_name(verdict["owner_pids"][0])
+            if owner and owner.lower() == vara.PROCESS_NAME:
+                return dict(verdict, ok=False, needs_confirmation=False,
+                            message="Ports 8300 and 8301 belong to VARA. Close VARA, or select "
+                                    "VARA HF as the modem.")
+        return verdict
 
-    def _show_port_check(self, verdict: dict) -> None:
+    def _check_ports_worker(self, modem: str, pid: int | None) -> None:
+        self._call(self._show_port_check, modem, self._port_verdict(modem, pid))
+
+    def _status_label(self, modem: str):
+        return self.vara_status if modem == "vara" else self.mercury_status
+
+    def _show_port_check(self, modem: str, verdict: dict) -> None:
         color = "green" if verdict["ok"] and not verdict["needs_confirmation"] else (
             "orange" if verdict["ok"] else "red")
-        self._set_label(self.mercury_status, verdict["message"], color)
+        self._set_label(self._status_label(modem), verdict["message"], color)
+
+    # ------------------------------------------------------------------ VARA
+    def _browse_vara(self) -> None:
+        selected = filedialog.askopenfilename(
+            title="Select VARA.exe", filetypes=[("VARA.exe", "VARA.exe"), ("Programs", "*.exe")])
+        if selected:
+            self.values["vara_exe"].set(selected)
+            self._save_settings()
+            self._check_vara()
+
+    def _check_vara(self) -> None:
+        self._set_label(self.vara_status, "Checking VARA…", "gray")
+        self._in_background(self._check_vara_worker, self.values["vara_exe"].get(),
+                            self.values["mycall"].get().strip().upper(),
+                            self.mercury.pid if self.mercury.running() else None)
+
+    def _check_vara_worker(self, exe: str, mycall: str, pid: int | None) -> None:
+        try:
+            info = vara.inspect(exe)
+        except (OSError, vara.VaraError, ValueError) as error:
+            self._call(self._show_vara, None, [str(error)], [], None)
+            return
+        errors, warnings = vara.setting_notes(info, mycall)
+        self._call(self._show_vara, info, errors, warnings, self._port_verdict("vara", pid))
+
+    def _show_vara(self, info: dict | None, errors: list[str], warnings: list[str],
+                   verdict: dict | None) -> None:
+        self.vara_info = info
+        if info is None:
+            self._set_label(self.vara_status, "VARA NOT READY. " + " ".join(errors), "red")
+            self.vara_detail.configure(text="")
+            return
+        arm = logic.vara_arm(info["registered"])
+        text = (f"{arm}. VARA.exe SHA-256 {info['exe_sha256'][:16]}…  Devices: "
+                f"{info['settings']['input_device']} / {info['settings']['output_device']}. "
+                "Registration codes are never read into the results.")
+        if verdict:
+            text += "  " + verdict["message"]
+        ready = not errors and verdict is not None and verdict["ok"]
+        self._set_label(self.vara_status, text, "green" if ready and not verdict["needs_confirmation"]
+                        else ("orange" if ready else "red"))
+        self.vara_detail.configure(text="\n".join(errors + warnings),
+                                   fg=COLORS["red"] if errors else COLORS["orange"])
+        self._test_changed()
 
     # ------------------------------------------------------------------ smoke tests
     def _run(self) -> None:
@@ -624,37 +812,65 @@ class ModemSmokeWindow(tk.Tk):
         self._in_background(self._preflight_worker, values, pid)
 
     def _preflight_worker(self, values: dict, pid: int | None) -> None:
-        verdict = runtime.preflight(listeners_with_pid(netstat_text(), PORTS), pid)
-        self._call(self._after_preflight, values, verdict)
+        verdict = self._port_verdict(values["modem"], pid)
+        vara_info, vara_errors, vara_warnings = None, [], []
+        if values["modem"] == "vara":
+            try:
+                vara_info = vara.inspect(values["vara_exe"])
+                vara_errors, vara_warnings = vara.setting_notes(vara_info, values["mycall"])
+            except (OSError, vara.VaraError, ValueError) as error:
+                vara_errors = [str(error)]
+        self._call(self._after_preflight, values, verdict, vara_info, vara_errors, vara_warnings)
 
-    def _after_preflight(self, values: dict, verdict: dict) -> None:
+    def _after_preflight(self, values: dict, verdict: dict, vara_info: dict | None = None,
+                         vara_errors: list[str] | None = None,
+                         vara_warnings: list[str] | None = None) -> None:
+        modem = values["modem"]
+        name = logic.MODEMS[modem]
+        problems = list(vara_errors or [])
         if not verdict["ok"]:
+            problems.insert(0, verdict["message"])
+        if problems:
             self.run_button.configure(state="normal")
-            self._set_label(self.mercury_status, verdict["message"], "red")
-            messagebox.showwarning("Mercury is not ready", verdict["message"])
+            self._set_label(self._status_label(modem), " ".join(problems), "red")
+            messagebox.showwarning(f"{name} is not ready", "\n".join(problems))
             return
         if verdict["needs_confirmation"] and not messagebox.askyesno(
-                "Mercury not started here", verdict["message"] + "\n\nRun the test anyway?"):
+                f"{name}: please confirm", verdict["message"] + "\n\nRun the test anyway?"):
             self.run_button.configure(state="normal")
             return
-        session = self.session if (self.session and self.mercury.running()) else None
-        (HERE / "smoke_config.toml").write_text(logic.config_text(values, session), encoding="utf-8")
+        session = self.session if (modem == "mercury" and self.session and self.mercury.running()) else None
+        if vara_info:
+            self.vara_info = vara_info
+            vara_info = dict(vara_info, pid=(verdict["owner_pids"] or [None])[0],
+                             process_name=verdict.get("owner_name"))
+        (HERE / "smoke_config.toml").write_text(logic.config_text(values, session, vara_info),
+                                                encoding="utf-8")
         preset = logic.MERCURY_TESTS[self.test_name.get()]
         repetition = self.repeat.get() if logic.is_h1(self.test_name.get()) else 1
         commands = logic.mercury_commands(preset, values["role"], repetition)
+        tag = logic.test_tag(self.test_name.get(), repetition)
         self.log.delete("1.0", "end")
+        self._append_log(f"=== {tag} · {'SENDER (PC A)' if values['role'] == 'A' else 'RECEIVER (PC B)'}"
+                         f" · {name}" + (f" · {logic.vara_arm(vara_info['registered'])}" if vara_info else "")
+                         + " ===")
         self._append_log(verdict["message"])
+        for note in logic.callsign_notes(values) + list(vara_warnings or []):
+            self._append_log("Note: " + note)
         if verdict["all_interfaces"]:
-            self._append_log("Note: Mercury listens on all network interfaces; keep this PC "
+            self._append_log(f"Note: {name} listens on all network interfaces; keep this PC "
                              "off the network during the test.")
         if values["role"] == "A":
             self._append_log("PC A: start this only after PC B shows 'waiting_for_connection'.")
-        self._set_summary("Running… Do not close this window.", "gray")
+        self._set_summary(f"Running {tag}… Do not close this window.", "gray")
         self._set_busy(True)
-        self.worker = threading.Thread(target=self._run_commands, args=(commands,), daemon=True)
+        window = None
+        if modem == "mercury" and self.status_monitor and session and session.get("status_log"):
+            window = {"start": mercury_status.utc_now(), "log": session["status_log"]}
+        self.worker = threading.Thread(target=self._run_commands, args=(commands, window), daemon=True)
         self.worker.start()
 
-    def _run_commands(self, commands: list[list[str]]) -> None:
+    def _run_commands(self, commands: list[list[str]], window: dict | None = None) -> None:
         environment = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         latest_result: str | None = None
@@ -679,11 +895,33 @@ class ModemSmokeWindow(tk.Tk):
                     latest_result = path
             exit_code = self.process.wait()
             result_path = HERE / latest_result if latest_result else None
+            if window and result_path and result_path.is_file():
+                self._write_level_summary(window, result_path.parent)
             if result_path and result_path.is_file():
                 self.event_queue.put(("summary", result_path.read_text(encoding="utf-8")))
             if exit_code != 0:
                 break
         self.event_queue.put(("done", ""))
+
+    def _write_level_summary(self, window: dict, run_dir: Path) -> None:
+        """Store Mercury's levels during the test beside its result.json."""
+        summary = mercury_status.summarize_window(window["log"], window["start"],
+                                                  mercury_status.utc_now())
+        try:
+            (run_dir / "level_summary.json").write_text(json.dumps(summary, indent=2),
+                                                        encoding="utf-8")
+        except OSError:
+            return
+        if summary.get("available"):
+            peak = summary["tx_peak_max_dbfs"]
+            line = (f"Level during the test: TX peak max "
+                    f"{'—' if peak is None else f'{peak:.1f} dBFS'}"
+                    f"{' (ABOVE 80 % OF FULL SCALE)' if summary['tx_peak_over_limit'] else ''}, "
+                    f"RX SNR {summary['rx_snr_min_db']}–{summary['rx_snr_max_db']} dB, "
+                    f"audio {'OK' if summary['audio_ok'] else 'FAILED: ' + ', '.join(summary['audio_errors'])}.")
+        else:
+            line = "Level during the test: Mercury's status was not available."
+        self.event_queue.put(("log", line))
 
     def _drain_queue(self) -> None:
         try:
@@ -726,6 +964,25 @@ class ModemSmokeWindow(tk.Tk):
         destination = HERE / f"results_{self.values['role'].get()}_{time.strftime('%Y%m%d_%H%M%S')}"
         archive = shutil.make_archive(str(destination), "zip", str(RESULTS))
         messagebox.showinfo("Results ZIP", f"Created:\n{archive}")
+
+    def _cross_check_zip(self) -> None:
+        if self._test_running():
+            return
+        archive = filedialog.askopenfilename(
+            title="Results ZIP created on the other PC (Create results ZIP)",
+            filetypes=[("Results ZIP", "*.zip")],
+        )
+        if not archive:
+            return
+        RESULTS.mkdir(exist_ok=True)
+        self.log.delete("1.0", "end")
+        self._append_log("Pairing every test of this PC with the other PC's results by test name "
+                         "and start time. Pairs of different tests are rejected.")
+        self._set_summary("Cross-checking the session…", "gray")
+        self._set_busy(True)
+        command = ["smoke_cross_check.py", "--pair", str(RESULTS), archive]
+        self.worker = threading.Thread(target=self._run_commands, args=([command], None), daemon=True)
+        self.worker.start()
 
     def _cross_check(self) -> None:
         sender = filedialog.askopenfilename(
@@ -776,6 +1033,8 @@ class ModemSmokeWindow(tk.Tk):
                 self._record_session_end("stopped_on_close", code)
             else:
                 self._record_session_end("left_running_on_close", None)
+        if self.status_monitor:
+            self.status_monitor.stop()
         self.destroy()
 
 

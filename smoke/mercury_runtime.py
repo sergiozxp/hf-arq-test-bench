@@ -51,6 +51,7 @@ SOUND_SYSTEMS = ("wasapi", "dsound")
 CMD_PORT = 8300
 DATA_PORT = 8301
 BROADCAST_PORT = 8100
+UI_PORT = 10000  # Mercury's status WebSocket, read by the level meter
 ALL_INTERFACES = ("0.0.0.0", "[::]", "*")
 
 
@@ -213,8 +214,13 @@ def ini_text(input_id: str, output_id: str, sound_system: str, app_version: str)
         f"; Mercury {MERCURY_VERSION}. Settings not listed keep Mercury's built-in defaults.\n"
         "; The callsign and bandwidth are not set here: the smoke client sends\n"
         "; MYCALL and BW500/BW2300 on port 8300 at the start of every test.\n"
+        "; ui_enabled publishes Mercury's status (TX peak, SNR, audio state) on a local\n"
+        "; WebSocket for the level meter; the waterfall is off to spare CPU.\n"
         "[main]\n"
-        "ui_enabled = false\n"
+        "ui_enabled = true\n"
+        f"ui_port = {UI_PORT}\n"
+        "ui_protocol = ws\n"
+        "waterfall_enabled = false\n"
         f"input_device = {_ini_quote(input_id)}\n"
         f"output_device = {_ini_quote(output_id)}\n"
         "capture_channel = left\n"
