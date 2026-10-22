@@ -113,6 +113,11 @@ def owner_verdict(verdict: dict, owner_name: str | None) -> dict:
     """Refine a port preflight for VARA with the name of the process that owns 8300."""
     verdict = dict(verdict, owner_name=owner_name)
     if not verdict["ok"]:
+        if not verdict["owner_pids"]:
+            verdict["message"] = (
+                "Nothing is listening on ports 8300 and 8301. Open VARA (press 'Continue to "
+                "Evaluate' if the Free Trial window appears) and check that VARA Setup uses TCP "
+                "command port 8300, then press Check VARA.")
         return verdict
     name = (owner_name or "").lower()
     if name == PROCESS_NAME:

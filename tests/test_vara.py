@@ -87,4 +87,7 @@ check(vara.owner_verdict(ok, "VARA.exe")["ok"] and not vara.owner_verdict(ok, "V
 check(not vara.owner_verdict(ok, "mercury.exe")["ok"], "Mercury owning the ports blocks a VARA test")
 check(vara.owner_verdict(ok, None)["needs_confirmation"], "an unknown owner needs confirmation")
 check(not vara.owner_verdict(dict(ok, ok=False), "VARA.exe")["ok"], "closed ports stay blocked")
+closed = vara.owner_verdict(dict(ok, ok=False, owner_pids=[], message="Start Mercury"), None)
+check(not closed["ok"] and "Open VARA" in closed["message"] and "Mercury" not in closed["message"],
+      "closed ports tell the operator to open VARA, not Mercury")
 print("ALL VARA TESTS PASSED")
