@@ -1,73 +1,9 @@
-"""mercury_smoke_client.py - cliente de prueba para Mercury 1.9.19 (puertos 8300/8301).
+"""Mercury 1.9.19 client for Modem Smoke Profile MS-1.0.
 
-Cubre E0-1 (payload por 8301), E0-2 (orden de BW y negociación) y H1.
-Se ejecuta UNA vez por sesión: `listen` en el PC B y `send` en el PC A.
-
-USO
-  PC B:  python mercury_smoke_client.py listen --tag E0-1_1KB --payload-size 1024
-  PC A:  python mercury_smoke_client.py send   --tag E0-1_1KB --payload-size 1024
-  Variantes de E0-2:  --bw-when before | after | none   (en ambos PCs)
-  Fase formal:        --phase smoke --tag H1-1
-  Después:            python smoke_cross_check.py <result emisor> <result receptor>
-
-QUÉ HACE
-  - Envía MYCALL, BW (según --bw-when), LISTEN ON / CONNECT, y juzga la respuesta a cada
-    comando según docs/TNC.md de Mercury (rama mercuryv2): `OK` = aceptado, `WRONG` =
-    rechazado, cualquier otra cosa o silencio = respuesta no reconocida (fallo). Guarda
-    siempre las líneas crudas.
-  - Registra la línea CONNECTED completa y la valida: `CONNECTED <origen> <destino> <ancho>`
-    (origen = quien inició la sesión). Se exigen exactamente 4 campos; se compara el ancho
-    (500 o BW500 se toleran) y los indicativos. Forma distinta, ancho o indicativos
-    incorrectos son fallo. El SSID, si Mercury lo devuelve, se compara como parte del texto.
-  - DISCONNECT con la sesión activa se juzga como cualquier comando. En la limpieza final
-    (si no se vio DISCONNECTED) una respuesta que no sea OK es un estado permitido: se
-    registra en `desconexion_limpieza` y lo que se juzga es el estado final.
-  - En `listen`, `--bw-when after` envía BW tras CONNECTED, igual que el emisor.
-  - Emisor: escribe en 8301 la cabecera de 16 B + payload, espera una línea `BUFFER 0`
-    con marca de tiempo ESTRICTAMENTE posterior al inicio de la escritura, y manda
-    DISCONNECT.
-  - Receptor: lee 8301 hasta completar exactamente la longitud declarada, calcula
-    el SHA-256 y lo compara con el truncado de la cabecera y con el payload
-    esperado (misma semilla). Un fragmento corto no se trata como payload
-    incompleto; 60 s sin bytes nuevos tras CONNECTED sí es timeout.
-  - Cuenta los bytes recibidos en 8301: cualquier byte más allá de 16+longitud, o
-    fuera del intervalo CONNECTED..DISCONNECTED, es un fallo.
-  - Guarda bytes crudos de 8300 y 8301 (rx y tx, con índice de tiempos de cada
-    envío y recepción), eventos con doble marca de tiempo, entorno inicial y final,
-    configuración con hash, el estado de cada socket y un result.json por corrida.
-  - Deja siempre dos campos separados: `arq_confirmado` (BUFFER 0, solo emisor) y
-    `entregado_integro` (hash verificado en B, solo receptor).
-
-QUÉ NO HACE
-  - No encadena variantes ni repeticiones: una ejecución = una sesión nueva.
-  - No reintenta ni reinicia Mercury; no modifica Mercury ni su configuración.
-  - No decide que algo "llegó" por BUFFER 0: el emisor deja `entregado_integro`
-    en null. La entrega la establece smoke_cross_check.py con el resultado de B.
-  - Supone que Mercury responde OK/WRONG una vez por comando y EN ORDEN (precondición a
-    verificar en E0-2). Si hubiera respuestas atrasadas, una OK podría asociarse al comando
-    siguiente; el script no correlaciona respuestas por comando.
-  - No distingue, solo por marcas de recepción, un BUFFER 0 viejo retenido en el búfer TCP.
-    Anota `buffer_positivo_antes_de_cero` (observación) para decidir en v7 si se exige.
-  - El código de salida 0 de `send` significa SOLO "sesión emisora completada": no es
-    entrega. La entrega se lee en el resultado del receptor y en el cruce.
-  - No espera a que B termine de validar antes de enviar DISCONNECT (v6, H1, paso 4).
-    Si B no recibe todo por ese motivo, aparecerá como fallo en B; es algo a observar en E0-1.
-  - No usa simulador de canal ni mide rendimiento (es un smoke test).
-
-POR QUÉ
-  - Una sesión por ejecución cumple la regla de E0-2 de no encadenar variantes y de
-    partir desconectado en cada repetición de H1.
-  - BUFFER 0 es confirmación a nivel ARQ (docs/TNC.md), no entrega de aplicación;
-    por eso la entrega solo la prueba el hash en el receptor.
-  - Una respuesta WRONG a MYCALL, LISTEN ON o CONNECT invalida la prueba: sin eso podría
-    aprobarse una sesión montada sobre una configuración rechazada.
-  - BW es especial: en E0-2 la variante V2 (BW tras CONNECT) puede ser rechazada, y eso es
-    un resultado a clasificar (`bw_aceptado`), no un error del script. Solo es fallo si BW se
-    envía ANTES de conectar y se rechaza, o si el ancho de CONNECTED no coincide.
-  - Los eventos de 8300 y los datos de 8301 llegan por sockets distintos; se
-    admite una tolerancia (session_tolerance_ms) al comparar sus tiempos.
-  - `BUFFER 0` puede aparecer también antes de enviar datos; por eso solo se acepta una
-    línea posterior al inicio de la escritura y se registran todas las líneas BUFFER.
+One invocation performs one fresh sender or receiver session for E0-1, E0-2,
+or H1. The sender reports native ARQ confirmation separately from verified
+delivery. The receiver validates frame length and SHA-256. Use
+smoke_cross_check.py to establish end-to-end delivery.
 """
 from __future__ import annotations
 
@@ -78,7 +14,7 @@ import time
 import traceback
 
 from smoke_common import (HEADER_LEN, RunLog, TcpCapture, capture_environment,
-                          capture_final, load_config, problemas_de_evidencia, make_header, make_payload,
+                          capture_final, load_config, evidence_issues, make_header, make_payload,
                           mono_ns, parse_header, sha256_bytes)
 
 RX_CONNECTED = r"^\s*CONNECTED\b"
@@ -87,95 +23,89 @@ RX_BUFFER = r"^\s*BUFFER\s+(\d+)"
 RX_RESP = r"^\s*(OK|WRONG)\b"
 
 
-def segundos(a: int | None, b: int | None):
+def seconds_between(a: int | None, b: int | None):
     return None if a is None or b is None else (b - a) / 1e9
 
 
-def solo_digitos(t: str) -> str:
+def digits_only(t: str) -> str:
     return re.sub(r"\D", "", t)
 
 
-def hubo_buffer_positivo(lineas_ns, t_w0: int, t_cero_ns: int | None) -> bool:
-    """¿Hubo una línea BUFFER > 0 posterior a la escritura y no posterior al BUFFER 0 aceptado?
-    Se comparan marcas monotónicas ENTERAS en ns (sin pasar por segundos en coma flotante)."""
-    for t, txt in lineas_ns:
+def has_positive_buffer(lines_ns, t_write_ns: int, t_zero_ns: int | None) -> bool:
+    """Return whether a positive BUFFER occurred after writing and before BUFFER 0."""
+    for t, txt in lines_ns:
         m = re.search(RX_BUFFER, txt)
-        if m and int(m.group(1)) > 0 and t > t_w0 and (t_cero_ns is None or t <= t_cero_ns):
+        if m and int(m.group(1)) > 0 and t > t_write_ns and (t_zero_ns is None or t <= t_zero_ns):
             return True
     return False
 
 
-def hay_error(lineas, patrones) -> bool:
-    return any(re.search(p, l, re.I) for p in patrones for l in lineas)
+def has_error(lines, patterns) -> bool:
+    return any(re.search(pattern, line, re.I) for pattern in patterns for line in lines)
 
 
-def enviar_comando(cmd: TcpCapture, texto: str, ventana_s: float) -> dict:
-    """Envía un comando y espera su respuesta OK/WRONG (docs/TNC.md). Devuelve las líneas
-    crudas recibidas y el veredicto: "OK", "WRONG" o None si no hubo respuesta reconocida."""
+def send_command(cmd: TcpCapture, text: str, window_s: float) -> dict:
+    """Send one command and return its recognized OK or WRONG response."""
     idx = cmd.nlines()
-    cmd.send(texto.encode("ascii") + b"\r", etiqueta=texto)
-    r = cmd.wait_line(RX_RESP, ventana_s, start=idx)
-    time.sleep(0.1)  # recoge eventos que lleguen pegados a la respuesta
+    cmd.send(text.encode("ascii") + b"\r", label=text)
+    r = cmd.wait_line(RX_RESP, window_s, start=idx)
+    time.sleep(0.1)
     with cmd.cond:
-        lineas = [l[1] for l in cmd.lines[idx:]]
-    veredicto = re.match(RX_RESP, r[1][1]).group(1) if r else None
-    cmd.rlog.log("respuesta_comando", comando=texto, veredicto=veredicto, lineas=lineas)
-    return {"comando": texto, "respuesta": veredicto, "lineas": lineas}
+        lines = [line[1] for line in cmd.lines[idx:]]
+    response = re.match(RX_RESP, r[1][1]).group(1) if r else None
+    cmd.rlog.log("command_response", command=text, response=response, lines=lines)
+    return {"command": text, "response": response, "lines": lines}
 
 
-def juzgar(c: dict, etiqueta: str, fallos: list[str]) -> bool:
-    """Registra fallo si la respuesta no fue OK. Devuelve True si el comando fue aceptado."""
-    if c["respuesta"] == "OK":
+def judge_command(result: dict, label: str, failures: list[str]) -> bool:
+    """Record a failure unless the command response is OK."""
+    if result["response"] == "OK":
         return True
-    if c["respuesta"] == "WRONG":
-        fallos.append(f"{etiqueta}: Mercury respondió WRONG ({c['comando']})")
+    if result["response"] == "WRONG":
+        failures.append(f"{label}: Mercury returned WRONG ({result['command']})")
     else:
-        fallos.append(f"{etiqueta}: sin respuesta OK/WRONG reconocida ({c['comando']}); "
-                      f"líneas: {c['lineas']}")
+        failures.append(f"{label}: no recognized OK/WRONG response ({result['command']}); "
+                        f"lines: {result['lines']}")
     return False
 
 
-def analizar_connected(texto: str, bw_cmd: str, mi: str, otro: str, rol: str) -> dict:
-    """CONNECTED <origen> <destino> <ancho> (docs/TNC.md). El origen es quien inició la
-    sesión: el emisor (mi) en `send` y el otro PC en `listen`."""
-    campos = texto.split()
-    esperado = solo_digitos(bw_cmd)
-    info = {"linea": texto, "campos": campos, "ancho_esperado": esperado,
-            "forma_valida": len(campos) == 4,  # CONNECTED origen destino ancho
-            "ancho_coincide": None, "indicativos_coinciden": None}
-    if len(campos) == 4:
-        info["ancho_coincide"] = solo_digitos(campos[-1]) == esperado
-        esp = (mi, otro) if rol == "send" else (otro, mi)
-        info["indicativos_coinciden"] = (campos[1].upper(), campos[2].upper()) == \
-            (esp[0].upper(), esp[1].upper())
-        info["indicativos_esperados"] = list(esp)
+def parse_connected(text: str, bandwidth_command: str, mycall: str, peer_call: str,
+                    role: str) -> dict:
+    """Parse and validate a Mercury CONNECTED event."""
+    fields = text.split()
+    expected_bandwidth = digits_only(bandwidth_command)
+    info = {"line": text, "fields": fields, "expected_bandwidth": expected_bandwidth,
+            "valid_form": len(fields) == 4,
+            "bandwidth_matches": None, "callsigns_match": None}
+    if len(fields) == 4:
+        info["bandwidth_matches"] = digits_only(fields[-1]) == expected_bandwidth
+        expected_callsigns = (mycall, peer_call) if role == "send" else (peer_call, mycall)
+        info["callsigns_match"] = (fields[1].upper(), fields[2].upper()) == \
+            (expected_callsigns[0].upper(), expected_callsigns[1].upper())
+        info["expected_callsigns"] = list(expected_callsigns)
     return info
 
 
-def fallos_de_connected(info: dict) -> list[str]:
-    f = []
-    if not info["forma_valida"]:
-        f.append("línea CONNECTED con forma inesperada: se esperan 4 campos "
-                 "(CONNECTED origen destino ancho)")
-        return f
-    if info["ancho_coincide"] is not True:
-        f.append("ancho reportado en CONNECTED no coincide con el configurado")
-    if info["indicativos_coinciden"] is not True:
-        f.append("los indicativos de CONNECTED no son los esperados")
-    return f
+def connected_failures(info: dict) -> list[str]:
+    if not info["valid_form"]:
+        return ["CONNECTED has an unexpected form; expected 4 fields "
+                "(CONNECTED origin destination bandwidth)"]
+    failures = []
+    if info["bandwidth_matches"] is not True:
+        failures.append("CONNECTED bandwidth does not match the configured bandwidth")
+    if info["callsigns_match"] is not True:
+        failures.append("CONNECTED callsigns do not match the expected callsigns")
+    return failures
 
 
-def asegurar_desconexion(cmd: TcpCapture, espera_s: float, desde: int, win: float):
-    """Si no se vio DISCONNECTED, envía DISCONNECT de limpieza y confirma el estado final.
-    Aquí una respuesta que no sea OK es un estado PERMITIDO (la sesión pudo terminar justo
-    antes): no es fallo, pero se devuelve para registrarla en `desconexion_limpieza`.
-    Lo que se juzga es el estado final (DISCONNECTED visto o no)."""
+def ensure_disconnected(cmd: TcpCapture, espera_s: float, desde: int, win: float):
+    """Confirm the final DISCONNECTED event, sending cleanup if required."""
     visto = cmd.wait_line(RX_DISCONNECTED, 0.1, start=desde)
     limpieza = None
     if visto is None:
-        limpieza = enviar_comando(cmd, "DISCONNECT", win)
+        limpieza = send_command(cmd, "DISCONNECT", win)
         visto = cmd.wait_line(RX_DISCONNECTED, espera_s, start=desde)
-    return ("desconectado" if visto else "no_confirmado"), limpieza
+    return ("disconnected" if visto else "not_confirmed"), limpieza
 
 
 def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
@@ -184,80 +114,82 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     seed = cfg["general"]["payload_seed"]
     payload = make_payload(args.payload_size, seed)
     header = make_header(payload)
-    res = {"modo": "send", "tag": args.tag, "run_id": rlog.run_id,
-           "mycall": m["mycall"], "destino": m["peer_call"], "bw_comando": m["bw_command"],
-           "bw_cuando": args.bw_when, "payload_bytes": len(payload),
-           "payload_sha256": sha256_bytes(payload), "cabecera_hex": header.hex(),
-           "arq_confirmado": False, "entregado_integro": None}
-    fallos: list[str] = []
-    respuestas: dict[str, dict] = {}
+    res = {"mode": "send", "tag": args.tag, "run_id": rlog.run_id,
+           "protocol_version": cfg["general"].get("protocol_version", "5.0"),
+           "smoke_profile": cfg["general"].get("smoke_profile", "MS-1.0"),
+           "mycall": m["mycall"], "destination": m["peer_call"], "bw_command": m["bw_command"],
+           "bw_when": args.bw_when, "payload_bytes": len(payload),
+           "payload_sha256": sha256_bytes(payload), "header_hex": header.hex(),
+           "arq_confirmed": False, "delivered_intact": None}
+    failures: list[str] = []
+    responses: dict[str, dict] = {}
 
     def enviar_bw():
-        respuestas["bw"] = enviar_comando(cmd, m["bw_command"], win)
-        res["bw_aceptado"] = respuestas["bw"]["respuesta"] == "OK"
-        if args.bw_when == "before" and not res["bw_aceptado"]:
-            juzgar(respuestas["bw"], "BW antes de CONNECT", fallos)
+        responses["bw"] = send_command(cmd, m["bw_command"], win)
+        res["bw_accepted"] = responses["bw"]["response"] == "OK"
+        if args.bw_when == "before" and not res["bw_accepted"]:
+            judge_command(responses["bw"], "BW antes de CONNECT", failures)
 
-    respuestas["mycall"] = enviar_comando(cmd, f"MYCALL {m['mycall']}", win)
-    juzgar(respuestas["mycall"], "MYCALL", fallos)
+    responses["mycall"] = send_command(cmd, f"MYCALL {m['mycall']}", win)
+    judge_command(responses["mycall"], "MYCALL", failures)
     if args.bw_when == "before":
         enviar_bw()
 
     idx0 = cmd.nlines()
     t_cmd = mono_ns()
     t_conn = None
-    if not fallos:
-        respuestas["connect"] = enviar_comando(cmd, f"CONNECT {m['mycall']} {m['peer_call']}", win)
-        if juzgar(respuestas["connect"], "CONNECT", fallos):
+    if not failures:
+        responses["connect"] = send_command(cmd, f"CONNECT {m['mycall']} {m['peer_call']}", win)
+        if judge_command(responses["connect"], "CONNECT", failures):
             r = cmd.wait_line(RX_CONNECTED, m["connect_timeout_s"], start=idx0)
             if r is None:
-                fallos.append("no hubo CONNECTED")
+                failures.append("no CONNECTED event was observed")
             else:
                 t_conn = r[1][0]
-                res["connected"] = analizar_connected(r[1][1], m["bw_command"], m["mycall"],
+                res["connected"] = parse_connected(r[1][1], m["bw_command"], m["mycall"],
                                                       m["peer_call"], "send")
-                fallos += fallos_de_connected(res["connected"])
+                failures += connected_failures(res["connected"])
                 if args.bw_when == "after":
                     enviar_bw()
 
                 idx_w = cmd.nlines()
                 t_w0 = mono_ns()
                 try:
-                    data.send(header + payload, etiqueta="cabecera+payload")
+                    data.send(header + payload, label="cabecera+payload")
                 except OSError as e:
-                    fallos.append(f"error al escribir en 8301: {e!r}")
+                    failures.append(f"error while writing port 8301: {e!r}")
                 t_w1 = mono_ns()
-                res["t_escritura_s"] = segundos(t_w0, t_w1)
+                res["write_s"] = seconds_between(t_w0, t_w1)
                 b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", m["transfer_timeout_s"],
                                          start=idx_w, t_min_ns=t_w0)
                 with cmd.cond:
                     buffers_ns = [(t, txt) for t, txt in cmd.lines[idx_w:]
                                   if re.search(RX_BUFFER, txt)]
-                res["lineas_buffer"] = [(segundos(t_w0, t), txt) for t, txt in buffers_ns]
-                # Observación (no criterio): si Mercury informa BUFFER > 0 tras escribir, el
-                # BUFFER 0 posterior es una transición real y no un valor viejo retrasado.
-                res["buffer_positivo_antes_de_cero"] = hubo_buffer_positivo(
+                res["buffer_lines"] = [(seconds_between(t_w0, t), txt) for t, txt in buffers_ns]
+                # Observation, not a pass criterion: a positive BUFFER preceding zero
+                # shows a current buffer transition rather than a delayed stale value.
+                res["positive_buffer_before_zero"] = has_positive_buffer(
                     buffers_ns, t_w0, b0[1][0] if b0 else None)
                 if b0 is None:
-                    fallos.append("no se vio BUFFER 0 posterior al envío (timeout o cierre)")
+                    failures.append("B UFFER 0 was not observed after writing (timeout o cierre)")
                 else:
-                    res["arq_confirmado"] = True
-                    res["t_transferencia_s"] = segundos(t_w0, b0[1][0])
-                # La sesión sigue activa: DISCONNECT debe ser aceptado (OK).
-                respuestas["disconnect"] = enviar_comando(cmd, "DISCONNECT", win)
-                juzgar(respuestas["disconnect"], "DISCONNECT", fallos)
-    res["t_conexion_s"] = segundos(t_cmd, t_conn)
-    res["estado_final"], res["desconexion_limpieza"] = asegurar_desconexion(
+                    res["arq_confirmed"] = True
+                    res["t_transferencia_s"] = seconds_between(t_w0, b0[1][0])
+                # The session is active, so DISCONNECT must be accepted.
+                responses["disconnect"] = send_command(cmd, "DISCONNECT", win)
+                judge_command(responses["disconnect"], "DISCONNECT", failures)
+    res["connection_s"] = seconds_between(t_cmd, t_conn)
+    res["final_state"], res["cleanup_disconnect"] = ensure_disconnected(
         cmd, m["disconnect_wait_s"], idx0, win)
-    if res["estado_final"] != "desconectado":
-        fallos.append("no se confirmó DISCONNECTED")
-    res["respuestas"] = respuestas
-    res["error_en_respuestas"] = hay_error(
-        [l for v in respuestas.values() for l in v["lineas"]], m.get("error_patterns", []))
-    if res["error_en_respuestas"]:
-        fallos.append("una respuesta coincide con error_patterns")
-    res["fallos"] = fallos
-    res["completado_emisor"] = not fallos
+    if res["final_state"] != "disconnected":
+        failures.append("DISCONNECTED was not confirmed")
+    res["responses"] = responses
+    res["command_response_error"] = has_error(
+        [l for v in responses.values() for l in v["lines"]], m.get("error_patterns", []))
+    if res["command_response_error"]:
+        failures.append("a command response matches error_patterns")
+    res["failures"] = failures
+    res["sender_completed"] = not failures
     return res
 
 
@@ -265,146 +197,149 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     m = cfg["mercury"]
     win = m["cmd_response_window_s"]
     seed = cfg["general"]["payload_seed"]
-    res = {"modo": "listen", "tag": args.tag, "run_id": rlog.run_id,
-           "mycall": m["mycall"], "bw_comando": m["bw_command"], "bw_cuando": args.bw_when,
-           "entregado_integro": False, "arq_confirmado": None}
-    fallos: list[str] = []
-    respuestas: dict[str, dict] = {}
+    res = {"mode": "listen", "tag": args.tag, "run_id": rlog.run_id,
+           "protocol_version": cfg["general"].get("protocol_version", "5.0"),
+           "smoke_profile": cfg["general"].get("smoke_profile", "MS-1.0"),
+           "mycall": m["mycall"], "bw_command": m["bw_command"], "bw_when": args.bw_when,
+           "delivered_intact": False, "arq_confirmed": None}
+    failures: list[str] = []
+    responses: dict[str, dict] = {}
 
     def enviar_bw():
-        respuestas["bw"] = enviar_comando(cmd, m["bw_command"], win)
-        res["bw_aceptado"] = respuestas["bw"]["respuesta"] == "OK"
-        if args.bw_when == "before" and not res["bw_aceptado"]:
-            juzgar(respuestas["bw"], "BW antes de LISTEN ON", fallos)
+        responses["bw"] = send_command(cmd, m["bw_command"], win)
+        res["bw_accepted"] = responses["bw"]["response"] == "OK"
+        if args.bw_when == "before" and not res["bw_accepted"]:
+            judge_command(responses["bw"], "BW antes de LISTEN ON", failures)
 
-    respuestas["mycall"] = enviar_comando(cmd, f"MYCALL {m['mycall']}", win)
-    juzgar(respuestas["mycall"], "MYCALL", fallos)
+    responses["mycall"] = send_command(cmd, f"MYCALL {m['mycall']}", win)
+    judge_command(responses["mycall"], "MYCALL", failures)
     if args.bw_when == "before":
         enviar_bw()
     idx0 = cmd.nlines()
     t_conn = t_disc = None
-    if not fallos:
-        respuestas["listen"] = enviar_comando(cmd, "LISTEN ON", win)
-        if juzgar(respuestas["listen"], "LISTEN ON", fallos):
-            rlog.log("esperando_conexion")
+    if not failures:
+        responses["listen"] = send_command(cmd, "LISTEN ON", win)
+        if judge_command(responses["listen"], "LISTEN ON", failures):
+            rlog.log("waiting_for_connection")
             r = cmd.wait_line(RX_CONNECTED, m["listen_timeout_s"], start=idx0)
             if r is None:
-                fallos.append("no hubo CONNECTED")
+                failures.append("no CONNECTED event was observed")
             else:
                 t_conn = r[1][0]
-                res["connected"] = analizar_connected(r[1][1], m["bw_command"], m["mycall"],
+                res["connected"] = parse_connected(r[1][1], m["bw_command"], m["mycall"],
                                                       m["peer_call"], "listen")
-                fallos += fallos_de_connected(res["connected"])
+                failures += connected_failures(res["connected"])
                 if args.bw_when == "after":   # igual que el emisor: tras CONNECTED
                     enviar_bw()
                 try:
                     cab = data.read_exact(HEADER_LEN, m["idle_timeout_s"])
                     largo, hash_trunc = parse_header(cab)
-                    res["longitud_declarada"] = largo
+                    res["declared_length"] = largo
                     if largo > cfg["general"]["max_payload_bytes"]:
-                        raise ValueError(f"longitud declarada absurda: {largo}")
+                        raise ValueError(f"declared length is unreasonable: {largo}")
                     cuerpo = data.read_exact(largo, m["idle_timeout_s"])
                     t_fin = mono_ns()
-                    res["t_transferencia_s"] = segundos(t_conn, t_fin)
+                    res["t_transferencia_s"] = seconds_between(t_conn, t_fin)
                     sha = sha256_bytes(cuerpo)
                     res["payload_sha256"] = sha
-                    res["hash_truncado_coincide"] = bytes.fromhex(sha)[:8] == hash_trunc
+                    res["truncated_hash_matches"] = bytes.fromhex(sha)[:8] == hash_trunc
                     esperado = sha256_bytes(make_payload(largo, seed))
-                    res["coincide_con_payload_esperado"] = (sha == esperado)
-                    if not res["hash_truncado_coincide"]:
-                        fallos.append("el SHA-256 no coincide con la cabecera")
-                    if not res["coincide_con_payload_esperado"]:
-                        fallos.append("el payload no coincide con el generado con la semilla")
+                    res["matches_expected_payload"] = (sha == esperado)
+                    if not res["truncated_hash_matches"]:
+                        failures.append("SHA-256 does not match the header")
+                    if not res["matches_expected_payload"]:
+                        failures.append("payload does not match the seeded payload")
                 except (TimeoutError, ConnectionError, ValueError) as e:
-                    fallos.append(f"lectura de 8301 fallida: {e!r}")
+                    failures.append(f"port 8301 read failed: {e!r}")
 
                 # Bytes extra: espera de gracia y luego cuenta todo lo recibido en 8301.
                 time.sleep(m["extra_bytes_grace_s"])
                 d = cmd.wait_line(RX_DISCONNECTED, m["disconnect_wait_s"], start=idx0)
                 if d:
                     t_disc = d[1][0]
-    res["estado_final"], res["desconexion_limpieza"] = asegurar_desconexion(
+    res["final_state"], res["cleanup_disconnect"] = ensure_disconnected(
         cmd, m["disconnect_wait_s"], idx0, win)
 
-    esperado_total = HEADER_LEN + res.get("longitud_declarada", 0)
+    esperado_total = HEADER_LEN + res.get("declared_length", 0)
     total = sum(n for _, n in data.chunks)
-    res["bytes_8301_totales"] = total
-    res["bytes_8301_esperados"] = esperado_total
+    res["data_port_total_bytes"] = total
+    res["data_port_expected_bytes"] = esperado_total
     if total > esperado_total:
-        fallos.append(f"bytes extra en 8301: {total - esperado_total}")
+        failures.append(f"extra bytes on port 8301: {total - esperado_total}")
     tol = m["session_tolerance_ms"] * 1_000_000
     fuera = sum(n for t, n in data.chunks
                 if (t_conn is None or t < t_conn - tol)
                 or (t_disc is not None and t > t_disc + tol))
-    res["bytes_8301_fuera_de_sesion"] = fuera
+    res["data_port_bytes_outside_session"] = fuera
     if fuera:
-        fallos.append(f"{fuera} bytes en 8301 fuera de la sesión CONNECTED")
-    res["bloques_8301"] = [{"t_mono_ns": t, "bytes": n} for t, n in data.chunks]
+        failures.append(f"{fuera} bytes on port 8301 outside the CONNECTED session")
+    res["data_port_chunks"] = [{"t_mono_ns": t, "bytes": n} for t, n in data.chunks]
 
-    if res["estado_final"] != "desconectado":
-        fallos.append("no se confirmó DISCONNECTED")
-    res["respuestas"] = respuestas
-    res["error_en_respuestas"] = hay_error(
-        [l for v in respuestas.values() for l in v["lineas"]], m.get("error_patterns", []))
-    if res["error_en_respuestas"]:
-        fallos.append("una respuesta coincide con error_patterns")
-    res["fallos"] = fallos
-    res["entregado_integro"] = (not fallos and res.get("coincide_con_payload_esperado") is True
-                                and res.get("hash_truncado_coincide") is True)
+    if res["final_state"] != "disconnected":
+        failures.append("DISCONNECTED was not confirmed")
+    res["responses"] = responses
+    res["command_response_error"] = has_error(
+        [l for v in responses.values() for l in v["lines"]], m.get("error_patterns", []))
+    if res["command_response_error"]:
+        failures.append("a command response matches error_patterns")
+    res["failures"] = failures
+    res["delivered_intact"] = (not failures and res.get("matches_expected_payload") is True
+                                and res.get("truncated_hash_matches") is True)
     return res
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Cliente de smoke test para Mercury.")
-    ap.add_argument("modo", choices=["send", "listen"])
+    ap = argparse.ArgumentParser(description="Mercury modem smoke client.")
+    ap.add_argument("mode", choices=["send", "listen"])
     ap.add_argument("--config", default="smoke_config.toml")
     ap.add_argument("--phase", choices=["e0", "smoke"], default="e0")
-    ap.add_argument("--tag", required=True, help="Ej.: E0-1_1KB, E0-2_V1, H1-1")
+    ap.add_argument("--tag", required=True, help="For example: E0-1_1KB, E0-2_V1, H1-1")
     ap.add_argument("--payload-size", type=int, default=200)
     ap.add_argument("--bw-when", choices=["before", "after", "none"], default="before",
-                    help="before: BW antes de CONNECT/LISTEN ON; after: tras CONNECTED "
-                         "(emisor) o tras LISTEN ON (receptor); none: no enviar BW")
+                    help="before: BW before CONNECT/LISTEN ON; after: after CONNECTED "
+                         "(sender) or LISTEN ON (receiver); none: do not send BW")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
     rlog = RunLog(cfg, args.phase, args.tag)
     m = cfg["mercury"]
-    puertos = (m["cmd_port"], m["data_port"])
+    ports = (m["cmd_port"], m["data_port"])
     cmd = data = None
     env: dict = {}
-    res: dict = {"modo": args.modo, "tag": args.tag, "run_id": rlog.run_id}
-    codigo = 1
+    res: dict = {"mode": args.mode, "tag": args.tag, "run_id": rlog.run_id}
+    exit_code = 1
     try:
-        env = capture_environment(cfg, rlog, puertos=puertos)
+        env = capture_environment(cfg, rlog, puertos=ports)
         cmd = TcpCapture("8300", m["host"], m["cmd_port"], rlog, line_mode=True)
         data = TcpCapture("8301", m["host"], m["data_port"], rlog, line_mode=False)
-        res = (run_send if args.modo == "send" else run_listen)(args, cfg, rlog, cmd, data)
-        codigo = 0 if (res.get("completado_emisor") or res.get("entregado_integro")) else 1
+        res = (run_send if args.mode == "send" else run_listen)(args, cfg, rlog, cmd, data)
+        exit_code = 0 if (res.get("sender_completed") or res.get("delivered_intact")) else 1
     except Exception as e:  # noqa: BLE001 - se registra el error completo
-        res["excepcion"] = traceback.format_exc()
-        res["fallos"] = res.get("fallos", []) + [f"excepción: {e!r}"]
-        rlog.log("excepcion", detalle=res["excepcion"])
+        res["exception"] = traceback.format_exc()
+        res["failures"] = res.get("failures", []) + [f"exception: {e!r}"]
+        rlog.log("exception", detail=res["exception"])
     finally:
         # Estado de cada socket: distingue cierre limpio, timeout y error del socket.
-        res["sockets"] = {s.nombre: s.estado() for s in (cmd, data) if s}
+        res["sockets"] = {s.name: s.state() for s in (cmd, data) if s}
         for s in (cmd, data):
             if s:
                 s.close()
-        fin = capture_final(cfg, rlog, puertos=puertos)
-        res.update(problemas_de_evidencia(cfg, env, fin))
-        if res["evidencia_incompleta"]:
-            codigo = codigo or 1
+        fin = capture_final(cfg, rlog, puertos=ports)
+        res.update(evidence_issues(cfg, env, fin))
+        if res["incomplete_evidence"]:
+            exit_code = exit_code or 1
         ruta = rlog.save_json("result.json", res)
-        rlog.log("fin", resultado_json=str(ruta), fallos=res.get("fallos"))
+        rlog.log("end", result_json=str(ruta), failures=res.get("failures"))
         rlog.close()
-    print(f"\nResultado guardado en: {ruta}")
-    if res.get("evidencia_incompleta"):
-        print("EVIDENCIA INCOMPLETA:", res["evidencia_incompleta"])
-    if args.modo == "send":
-        print("Código 0 = sesión emisora completada. NO prueba entrega: falta el resultado de B "
-              "(smoke_cross_check.py).")
-    return codigo
+    print(f"\nResult saved to: {ruta}")
+    if res.get("incomplete_evidence"):
+        print("INCOMPLETE EVIDENCE:", res["incomplete_evidence"])
+    if args.mode == "send":
+        print("Exit code 0 = sender session completed. It does NOT prove delivery; "
+              "check the receiver outcome with smoke_cross_check.py.")
+    return exit_code
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

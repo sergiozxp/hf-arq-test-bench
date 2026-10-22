@@ -1,47 +1,32 @@
-# Copiar a smoke_config.toml en CADA PC y ajustar. Cada PC tiene su propio indicativo.
-
+# Copy this file to smoke_config.toml on each PC and edit the callsigns.
 [general]
-results_dir = "results"          # se crean results/e0/... y results/smoke/...
-payload_seed = 20261018          # semilla fija: mismo payload en todas las corridas
-max_payload_bytes = 1048576      # tope de cordura para la longitud declarada en la cabecera
+results_dir = "results"
+payload_seed = 20261021
+max_payload_bytes = 1048576
+protocol_version = "5.0"
+smoke_profile = "MS-1.0"
 
 [mercury]
 host = "127.0.0.1"
 cmd_port = 8300
 data_port = 8301
-mycall = "CALL-A"                # PC A: CALL-A / PC B: CALL-B
-peer_call = "CALL-B"             # indicativo del otro PC
-bw_command = "BW500"             # BW500 o BW2300
-cmd_response_window_s = 2.0      # ventana para recoger la respuesta a cada comando
-connect_timeout_s = 180          # espera de CONNECTED en el emisor
-listen_timeout_s = 900           # espera de CONNECTED en el receptor
-transfer_timeout_s = 1800        # espera de BUFFER 0 en el emisor
-idle_timeout_s = 60              # sin bytes nuevos en 8301 = timeout (E0-1)
-extra_bytes_grace_s = 5          # espera tras completar el payload para detectar bytes extra
-disconnect_wait_s = 60           # espera de DISCONNECTED
-session_tolerance_ms = 50        # tolerancia entre el evento CONNECTED y los primeros bytes
-# Expresiones regulares (sin distinguir mayúsculas) que marcan una respuesta como error.
-# Vacío a propósito: el formato de las respuestas de Mercury se confirma en E0-2.
-error_patterns = []
-
-[pat]
-base_url = "http://localhost:8080"   # dirección HTTP de Pat en este PC
 mycall = "CALL-A"
 peer_call = "CALL-B"
-http_timeout_s = 30                  # llamadas HTTP normales
-connect_timeout_s = 1800             # POST /api/connect bloquea hasta el fin de la sesión
-transport = "varahf"
+bw_command = "BW500"
+cmd_response_window_s = 2.0
+connect_timeout_s = 180
+listen_timeout_s = 900
+transfer_timeout_s = 1800
+idle_timeout_s = 60
+extra_bytes_grace_s = 5
+disconnect_wait_s = 60
+session_tolerance_ms = 50
+error_patterns = []
 
-# Rutas de los binarios a registrar con su SHA-256 (dejar "" para omitir).
 [binaries]
 mercury_zip = ""
 mercury_exe = ""
-pat_exe = ""
 
-# Archivos que se copian a la carpeta de resultados (al inicio y al final) con su SHA-256.
-# Rutas de Windows entre comillas SIMPLES. Dejar "" para omitir.
-[registrar]
+[evidence]
 mercury_ini = ""
 mercury_log = ""
-pat_config = ""
-pat_log = ""
