@@ -11,3 +11,6 @@ dist/
 *.spec
 HF-ARQ-Smoke-datos/
 smoke_gui_ajustes.json
+HF-ARQ-Modem-Smoke-data/
+modem_smoke_settings.json
+mercury-1.9.19/

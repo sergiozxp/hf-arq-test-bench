@@ -5,6 +5,7 @@ payload_seed = 20261021
 max_payload_bytes = 1048576
 protocol_version = "5.0"
 smoke_profile = "MS-1.0"
+app_version = "0.2.0-alpha.2"
 
 [mercury]
 host = "127.0.0.1"
@@ -30,3 +31,8 @@ mercury_exe = ""
 [evidence]
 mercury_ini = ""
 mercury_log = ""
+mercury_console = ""
+
+# Written by the GUI when it starts Mercury. Run by hand: Mercury was started outside the GUI.
+[mercury_session]
+launched_by_gui = false

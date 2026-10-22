@@ -22,9 +22,23 @@ jobs:
       - name: Run simulated smoke tests
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           python tests/test_logic.py
+          python tests/test_runtime.py
           python tests/test_simulated_gui.py
           python tests/test_launcher.py --launcher "python smoke/smoke_gui.py"
+      - name: Download the official Mercury 1.9.19 Windows ZIP
+        shell: pwsh
+        run: >-
+          Invoke-WebRequest
+          -Uri https://github.com/Rhizomatica/mercury/releases/download/v1.9.19/mercury-1.9.19-w64-e9f0072d.zip
+          -OutFile "$env:RUNNER_TEMP/mercury-1.9.19-w64-e9f0072d.zip"
+      - name: Run tests against the real Mercury 1.9.19 (no sound card)
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python tests/test_real_mercury.py --zip "$env:RUNNER_TEMP/mercury-1.9.19-w64-e9f0072d.zip"
+          python tests/test_gui_real_mercury.py --zip "$env:RUNNER_TEMP/mercury-1.9.19-w64-e9f0072d.zip"
 
   build:
     needs: test

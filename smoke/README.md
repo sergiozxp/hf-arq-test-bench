@@ -10,8 +10,14 @@ not a benchmark runner and does not require Pat.
 - One USB audio interface per PC and two independent line-level audio paths
 - Python 3.11 or newer, or the packaged HF-ARQ-Modem-Smoke.exe
 
-Copy this directory to both PCs. Copy smoke_config.example.toml to
-smoke_config.toml and set the local and peer callsigns on each PC.
+The GUI (smoke_gui.py, or the packaged HF-ARQ-Modem-Smoke.exe) is the normal
+way to run the profile: it verifies the official Mercury ZIP, starts Mercury
+with the selected sound devices, checks ports 8300/8301 and runs the tests.
+See docs/windows_modem_smoke_guide.md.
+
+The scripts can also be run from a command prompt. In that case Mercury is
+started by hand. Copy smoke_config.example.toml to smoke_config.toml and set
+the local and peer callsigns on each PC.
 
 ## Mercury workflow
 

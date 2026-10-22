@@ -29,6 +29,8 @@ class Variable:
         return self.value
     def set(self, value):
         self.value = value
+    def trace_add(self, *args, **kwargs):
+        pass
 
 
 class Root(Widget):
@@ -49,7 +51,7 @@ dialogs = types.ModuleType("tkinter.filedialog")
 messages = types.ModuleType("tkinter.messagebox")
 for name in ("askopenfilename", "asksaveasfilename"):
     setattr(dialogs, name, lambda *args, **kwargs: "")
-for name in ("showwarning", "showinfo", "showerror", "askyesno"):
+for name in ("showwarning", "showinfo", "showerror", "askyesno", "askyesnocancel"):
     setattr(messages, name, lambda *args, **kwargs: True)
 tk.ttk, tk.filedialog, tk.messagebox = ttk, dialogs, messages
 sys.modules.update({
@@ -61,6 +63,10 @@ import smoke_gui
 
 window = smoke_gui.ModemSmokeWindow()
 assert window.test_name.get().startswith("E0-1")
+assert window.values["sound_system"].get() == "wasapi"
+assert not window.mercury.running()
+assert smoke_gui.device_labels([{"name": "X"}, {"name": "X"}, {"name": "Y"}]) == ["X", "X  [2]", "Y"]
+assert smoke_gui.MERCURY_DIR.name == "mercury-1.9.19"
 assert smoke_gui.process_command(["mercury_smoke_client.py", "send"])[1:3] == [
     "-u", str(ROOT / "smoke" / "mercury_smoke_client.py")
 ]
