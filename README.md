@@ -72,3 +72,12 @@ observed compression.
 
 The code in this repository is released under the MIT License. Mercury, VARA,
 and their associated documentation are separate third-party products.
+
+## Publishing a release
+
+In GitHub, open **Actions → Build HF-ARQ Modem Smoke → Run workflow**, keep the
+branch on `main`, and enter the release tag (for example `v0.2.0-alpha.3`). The
+workflow tests and builds the executable, checks that the tag matches
+`APP_VERSION` and does not exist yet, then creates the tag and the release with
+`HF-ARQ-Modem-Smoke.exe` and `SHA256SUMS.txt`. Tags with a suffix (`-alpha.N`)
+are published as pre-releases. Pushing a `v*` tag still publishes as before.
