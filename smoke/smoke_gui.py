@@ -370,14 +370,25 @@ class ModemSmokeWindow(tk.Tk):
             return
         name = self.test_name.get()
         sequence = logic.is_sequence(name)
-        enabled = sequence or logic.is_h1(name)
-        limit = len(logic.SEQUENCE) if sequence else 3
-        if self.repeat_mode != sequence:
-            # The spin box is the H1 repetition, or the first step of the sequence.
-            self.repeat_mode = sequence
+        campaign = logic.is_campaign(name)
+        enabled = sequence or campaign or logic.is_h1(name)
+        if campaign:
+            limit = logic.CAMPAIGN_TESTS[name]["attempts"]
+            kind = ("campaign", limit)
+            label, hint = (f"Start at attempt (1–{limit}):",
+                           "Normally 1. Use the same attempt on PC A, PC B and the simulator's first attempt.")
+        elif sequence:
+            limit, kind = len(logic.SEQUENCE), ("sequence", 0)
+            label, hint = logic.SEQUENCE_LABEL, logic.SEQUENCE_HINT
+        else:
+            limit, kind = 3, ("h1", 0)
+            label, hint = logic.REPETITION_LABEL, logic.REPETITION_HINT
+        if self.repeat_mode != kind:
+            # The spin box is the H1 repetition, the first step of the sequence or the first attempt.
+            self.repeat_mode = kind
             self.repeat_box.configure(to=limit)
-            self.repeat_label.configure(text=logic.SEQUENCE_LABEL if sequence else logic.REPETITION_LABEL)
-            self.repeat_hint.configure(text=logic.SEQUENCE_HINT if sequence else logic.REPETITION_HINT)
+            self.repeat_label.configure(text=label)
+            self.repeat_hint.configure(text=hint)
             self.repeat.set(1)
         self.repeat_box.configure(state="readonly" if enabled else "disabled")
         try:
@@ -395,6 +406,10 @@ class ModemSmokeWindow(tk.Tk):
                                          "then records (path B->A)." if self.values["role"].get() == "A"
                                          else "Start PC B first: it records (path A->B), then plays.")))
             return
+        if campaign:
+            order = (" Start PC B and the simulator first. PC A waits "
+                     f"{logic.CAMPAIGN_GAP_S} s between attempts." if self.values["role"].get() == "A"
+                     else " Start the simulator (same condition and first attempt), then this PC, then PC A.")
         if sequence:
             order = (" Start PC B first. PC A waits "
                      f"{logic.SEQUENCE_GAP_S} s between tests ({logic.SEQUENCE_GAP_S + 60} s after E0-3)." if self.values["role"].get() == "A"
@@ -924,8 +939,12 @@ class ModemSmokeWindow(tk.Tk):
                                                 encoding="utf-8")
         test_name = self.test_name.get()
         sequence = logic.is_sequence(test_name)
-        repetition = self.repeat.get() if (sequence or logic.is_h1(test_name)) else 1
-        if sequence:
+        campaign = logic.is_campaign(test_name)
+        repetition = self.repeat.get() if (sequence or campaign or logic.is_h1(test_name)) else 1
+        if campaign:
+            commands = logic.campaign_commands(values["role"], test_name, repetition)
+            tag = logic.test_tag(test_name, repetition)
+        elif sequence:
             commands = logic.sequence_commands(values["role"], repetition)
             tag = "Full sequence from step " + str(repetition)
         else:

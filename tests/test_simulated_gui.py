@@ -65,15 +65,18 @@ import smoke_gui
 
 window = smoke_gui.ModemSmokeWindow()
 assert window.test_name.get() == smoke_gui.logic.SEQUENCE_TEST, "the full sequence is the default"
-assert window.repeat_mode is True
+assert window.repeat_mode == ("sequence", 0)
 window.test_name.set(smoke_gui.logic.H1_TEST)
 window._test_changed()
-assert window.repeat_mode is False and window.repeat.get() == 1
+assert window.repeat_mode == ("h1", 0) and window.repeat.get() == 1
 window.test_name.set(smoke_gui.logic.SEQUENCE_TEST)
 window._test_changed()
 window.repeat.set(7)
 window._test_changed()
-assert window.repeat_mode is True and window.repeat.get() == 7, "the start step is kept"
+assert window.repeat_mode == ("sequence", 0) and window.repeat.get() == 7, "the start step is kept"
+window.test_name.set(smoke_gui.logic.KIT_TEST)
+window._test_changed()
+assert window.repeat_mode == ("campaign", 10) and window.repeat.get() == 1
 assert window.values["sound_system"].get() == "wasapi"
 assert not window.mercury.running()
 assert smoke_gui.device_labels([{"name": "X"}, {"name": "X"}, {"name": "Y"}]) == ["X", "X  [2]", "Y"]

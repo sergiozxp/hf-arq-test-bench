@@ -38,6 +38,11 @@ RUN_DIR_RE = re.compile(r"^(?P<tag>.+)_(?P<start>\d{8}T\d{6}Z)_(?P<rid>[0-9a-f]{
 # sender start minus receiver start). The negative margin absorbs clock offset.
 PAIR_WINDOW_S = (-120, 600)
 CROSSED_WINDOW_S = 120
+P1_TAG_RE = re.compile(r"^P1-(?P<condition>[a-z]+)-(?P<load>[0-9A-Za-z]+)-(?P<attempt>\d+)$")
+# The simulator runs on PC B, so its attempts are matched against PC B's runs (same clock):
+# attempt k starts on PC A's first audio, after PC B's run k started listening.
+SIM_EARLY_S = 0
+WILSON_Z = 1.96
 
 
 def _get(result: dict, *keys):
@@ -73,6 +78,8 @@ def pair_mismatches(em: dict, rx: dict) -> list[str]:
             continue
         if a != b:
             reasons.append(f"different {label}: {a} / {b}")
+    if em.get("condition") != rx.get("condition"):
+        reasons.append(f"different channel condition: {em.get('condition')} / {rx.get('condition')}")
     if bool(em.get("ack_mode")) != bool(rx.get("ack_mode")):
         reasons.append(f"same-session ACK on one side only: sender {bool(em.get('ack_mode'))}, "
                        f"receiver {bool(rx.get('ack_mode'))}")
@@ -218,6 +225,114 @@ def find_calibrations(root: Path, origin: str) -> list[dict]:
     return found
 
 
+def find_simulator_attempts(root: Path, origin: str) -> list[dict]:
+    """Attempts recorded by the channel simulator (results/simulator/*/sim_log.jsonl)."""
+    attempts = []
+    for log in sorted(root.rglob("sim_log.jsonl")):
+        if "cross_checks" in log.relative_to(root).parts:
+            continue
+        starts, ends = {}, {}
+        try:
+            for line in log.read_text(encoding="utf-8").splitlines():
+                record = json.loads(line)
+                if record.get("event") == "attempt_start":
+                    starts[(record["attempt"], record["t_utc"])] = record
+                elif record.get("event") == "attempt_end":
+                    ends[(record["attempt"], record.get("started_utc"))] = record
+        except (OSError, ValueError, KeyError):
+            continue
+        for key, start in starts.items():
+            end = ends.get(key)
+            attempts.append({"log": log.parent.name, "pc": origin, "attempt": start["attempt"],
+                             "mode": start.get("mode"),
+                             "start": datetime.fromisoformat(start["t_utc"]),
+                             "valid": bool(end and end.get("valid")),
+                             "problems": (end or {}).get("problems") or
+                             ([] if end else ["the simulator stopped before the attempt ended"])})
+    return attempts
+
+
+def wilson(successes: int, n: int, z: float = WILSON_Z) -> tuple[float | None, float | None]:
+    if n == 0:
+        return None, None
+    p = successes / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * (p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5 / denom
+    return round(max(0.0, centre - half), 4), round(min(1.0, centre + half), 4)
+
+
+def median(values: list[float]) -> float | None:
+    values = sorted(values)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+def attach_simulator(row: dict, sender: dict, receiver: dict, sim_attempts: list[dict]) -> None:
+    """Phase 1 pairs: the simulator attempt must exist, match and be valid, or the pair is not counted."""
+    match = P1_TAG_RE.match(sender["tag"])
+    if not match:
+        return
+    condition, attempt = match.group("condition"), int(match.group("attempt"))
+    row.update(condition=condition, load=match.group("load"), attempt=attempt,
+               delivery_time_s=sender["result"].get("delivery_time_s"),
+               deadline_reached=bool(sender["result"].get("deadline_reached")))
+    limit = (sender["result"].get("deadline_s") or 3600) + 300
+    near = sorted((a for a in sim_attempts
+                   if -SIM_EARLY_S <= (a["start"] - receiver["start"]).total_seconds() <= limit),
+                  key=lambda a: a["start"])
+    reasons = []
+    if not near:
+        reasons.append("no simulator attempt starts while PC B's run was listening")
+    else:
+        sim = near[0]
+        row["simulator"] = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in sim.items()}
+        if sim["mode"] != condition:
+            reasons.append(f"the simulator ran '{sim['mode']}', the run is '{condition}'")
+        if sim["attempt"] != attempt:
+            reasons.append(f"the simulator used attempt {sim['attempt']}'s trace for attempt {attempt}")
+        if not sim["valid"]:
+            reasons.extend(sim["problems"] or ["simulator attempt not valid"])
+    if reasons and row["outcome"] in ("passed", "failed"):
+        row["attempt_outcome"] = row["outcome"]
+        row["outcome"] = "not_counted"
+        row["not_counted_reasons"] = reasons
+
+
+def cell_table(rows: list[dict]) -> list[dict]:
+    cells: dict[tuple, dict] = {}
+    for row in rows:
+        if "condition" not in row:
+            continue
+        key = (row.get("arm"), row["condition"], row["load"])
+        cell = cells.setdefault(key, {"arm": key[0], "condition": key[1], "load": key[2], "attempts": 0,
+                                      "counted": 0, "successes": 0, "failures": 0, "deadline_reached": 0,
+                                      "not_counted": [], "times": []})
+        cell["attempts"] += 1
+        if row["outcome"] in ("passed", "failed"):
+            cell["counted"] += 1
+            if row["outcome"] == "passed":
+                cell["successes"] += 1
+                if row.get("delivery_time_s") is not None:
+                    cell["times"].append(row["delivery_time_s"])
+            else:
+                cell["failures"] += 1
+                cell["deadline_reached"] += int(bool(row.get("deadline_reached")))
+        else:
+            cell["not_counted"].append({"attempt": row.get("attempt"), "outcome": row["outcome"],
+                                        "reasons": row.get("not_counted_reasons") or row.get("warnings")})
+    out = []
+    for cell in cells.values():
+        low, high = wilson(cell["successes"], cell["counted"])
+        times = cell.pop("times")
+        cell.update(success_rate=round(cell["successes"] / cell["counted"], 4) if cell["counted"] else None,
+                    wilson_95=[low, high], median_delivery_s=None if not times else round(median(times), 1))
+        out.append(cell)
+    return sorted(out, key=lambda c: (str(c["arm"]), c["condition"], c["load"]))
+
+
 def pair_runs(runs: list[dict]) -> tuple[list[tuple[dict, dict]], list[dict], list[dict]]:
     """Pair senders with receivers by tag and start time.
 
@@ -257,9 +372,11 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
         other = safe_extract(other, out_dir / "other_pc" / other.stem)
     runs = find_runs(local, "this PC") + find_runs(other, "other PC")
     pairs, unpaired, crossed = pair_runs(runs)
+    sim_attempts = find_simulator_attempts(local, "this PC") + find_simulator_attempts(other, "other PC")
     rows = []
     for s, r in pairs:
         result = cross_check(s["result"], r["result"])
+        attach_simulator(result, s, r, sim_attempts)
         result["sender_dir"], result["receiver_dir"] = s["dir"], r["dir"]
         result["sender_pc"], result["receiver_pc"] = s["origin"], r["origin"]
         result["sender_start_utc"] = s["start"].isoformat()
@@ -286,11 +403,28 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
                                   or (item["started_utc"] or "") > (latest[item["direction"]]["started_utc"] or "")):
             latest[item["direction"]] = item
     report["calibration"] = {"latest": latest, "all": calibrations}
+    report["cells"] = cell_table(rows)
+    if report["cells"]:
+        # A Phase 1 session: failures are results; the session needs review only for
+        # attempts that could not be counted, crossed runs or runs without a partner.
+        clean = not crossed and not unpaired and not any(c["not_counted"] for c in report["cells"])
+        report["outcome"] = "passed" if clean else "review"
     report["outcome"] = ("passed" if rows and set(counts) == {"passed"} and not crossed
                          else "review")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "cross_check_report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    if report["cells"]:
+        with open(out_dir / "phase1_cells.csv", "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle, delimiter=";")
+            writer.writerow(["arm", "condition", "load", "attempts", "counted", "successes", "failures",
+                             "deadline_reached", "success_rate", "wilson_low", "wilson_high",
+                             "median_delivery_s", "not_counted"])
+            for c in report["cells"]:
+                writer.writerow([c["arm"], c["condition"], c["load"], c["attempts"], c["counted"],
+                                 c["successes"], c["failures"], c["deadline_reached"], c["success_rate"],
+                                 c["wilson_95"][0], c["wilson_95"][1], c["median_delivery_s"],
+                                 len(c["not_counted"])])
     with open(out_dir / "cross_check_report.csv", "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, delimiter=";")
         writer.writerow(["sender_start_utc", "tag", "outcome", "modem", "arm", "sender_run",

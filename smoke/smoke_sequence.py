@@ -48,6 +48,26 @@ def step_args(mode: str, config: str, test_name: str, repetition: int) -> list[s
     return [*command[1:], "--config", config]
 
 
+def smoke_plan(mode: str, config: str) -> list[dict]:
+    plan = []
+    for name, repetition in steps():
+        plan.append({"tag": logic.test_tag(name, repetition), "ack": bool(logic.MERCURY_TESTS[name].get("ack")),
+                     "args": step_args(mode, config, name, repetition)})
+    return plan
+
+
+def campaign_plan(mode: str, config: str, condition: str, load: str, attempts: int) -> list[dict]:
+    """Phase 1 cell: every attempt carries the ACK and the attempt deadline."""
+    plan = []
+    for k in range(1, attempts + 1):
+        tag = logic.campaign_tag(condition, load, k)
+        plan.append({"tag": tag, "ack": True, "args": [
+            mode, "--tag", tag, "--phase", "p1", "--payload-size", str(logic.CAMPAIGN_LOADS[load]),
+            "--bw-when", "before", "--ack", "--deadline-s", str(logic.CAMPAIGN_DEADLINE_S[load]),
+            "--condition", condition, "--config", config]})
+    return plan
+
+
 def run_step(args_list: list[str]) -> int:
     old = sys.argv
     try:
@@ -58,55 +78,67 @@ def run_step(args_list: list[str]) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Run the full MS-1.0 smoke sequence on one PC.")
+    ap = argparse.ArgumentParser(description="Run the full MS-1.0 smoke sequence, or a Phase 1 cell, on one PC.")
     ap.add_argument("mode", choices=["send", "listen"])
     ap.add_argument("--config", default="smoke_config.toml")
-    ap.add_argument("--from", dest="start", type=int, default=1, help="first step (1-9)")
+    ap.add_argument("--from", dest="start", type=int, default=1, help="first step or attempt")
     ap.add_argument("--gap-s", type=float, default=DEFAULT_GAP_S,
                     help="sender only: seconds to wait between tests")
     ap.add_argument("--ack-extra-s", type=float, default=ACK_EXTRA_GAP_S,
                     help="sender only: extra seconds to wait after a same-session ACK test")
+    ap.add_argument("--campaign", choices=list(logic.CAMPAIGN_CONDITIONS), default=None,
+                    help="Phase 1: run one cell in this channel condition")
+    ap.add_argument("--load", choices=list(logic.CAMPAIGN_LOADS), default="200B")
+    ap.add_argument("--attempts", type=int, default=30)
     args = ap.parse_args()
-    plan = steps()
+    campaign = args.campaign is not None
+    plan = (campaign_plan(args.mode, args.config, args.campaign, args.load, args.attempts) if campaign
+            else smoke_plan(args.mode, args.config))
     if not 1 <= args.start <= len(plan):
         print(f"--from must be between 1 and {len(plan)}")
         return 2
     cfg = load_config(args.config)
     started = datetime.now(timezone.utc)
     report = {"mode": args.mode, "started_utc": started.isoformat(timespec="seconds"),
-              "gap_s": args.gap_s if args.mode == "send" else 0, "from_step": args.start,
-              "steps": []}
+              "gap_s": args.gap_s if args.mode == "send" else 0, "from_step": args.start, "steps": []}
+    if campaign:
+        report["campaign"] = {"condition": args.campaign, "load": args.load, "attempts": args.attempts,
+                              "deadline_s": logic.CAMPAIGN_DEADLINE_S[args.load]}
     exit_code = 0
-    for number, (name, repetition) in enumerate(plan, start=1):
+    for number, step in enumerate(plan, start=1):
         if number < args.start:
             continue
-        tag = logic.test_tag(name, repetition)
+        tag = step["tag"]
         if args.mode == "send" and number > args.start:
-            previous = logic.MERCURY_TESTS[plan[number - 2][0]]
-            wait = args.gap_s + (args.ack_extra_s if previous.get("ack") else 0)
+            wait = args.gap_s + (args.ack_extra_s if plan[number - 2]["ack"] else 0)
             print(f"\nWaiting {wait:.0f} s so that PC B is listening for {tag}…", flush=True)
             time.sleep(wait)
         print(f"\n=== STEP {number}/{len(plan)}: {tag} ({'SENDER' if args.mode == 'send' else 'RECEIVER'}) ===",
               flush=True)
         t0 = time.monotonic()
-        code = run_step(step_args(args.mode, args.config, name, repetition))
+        code = run_step(step["args"])
         report["steps"].append({"step": number, "tag": tag, "exit_code": code,
                                 "duration_s": round(time.monotonic() - t0, 1)})
-        if code != 0:
+        if code != 0 and not campaign:
             print(f"\nSEQUENCE STOPPED at step {number} ({tag}): this test did not pass on this PC.",
                   flush=True)
             exit_code = code
             break
+        # In a campaign a failed attempt is a result, not a reason to stop.
     done = [s for s in report["steps"] if s["exit_code"] == 0]
     report["completed_steps"] = len(done)
     report["planned_steps"] = len(plan) - args.start + 1
     report["outcome"] = "completed" if exit_code == 0 else "stopped"
     out = Path(cfg.get("general", {}).get("results_dir", "results")) / "sequences"
     out.mkdir(parents=True, exist_ok=True)
-    path = out / f"sequence_{args.mode}_{started:%Y%m%dT%H%M%SZ}.json"
+    path = out / f"{'campaign' if campaign else 'sequence'}_{args.mode}_{started:%Y%m%dT%H%M%SZ}.json"
     path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(f"\nSEQUENCE {report['outcome'].upper()}: {len(done)} of {report['planned_steps']} test(s) "
-          f"completed on this PC. Next: cross-check the session with the other PC's ZIP.", flush=True)
+    if campaign:
+        print(f"\nCELL FINISHED: {len(report['steps'])} attempt(s) run, {len(done)} ended without failure on "
+              "this PC. Next: cross-check with the other PC's ZIP for the cell report.", flush=True)
+    else:
+        print(f"\nSEQUENCE {report['outcome'].upper()}: {len(done)} of {report['planned_steps']} test(s) "
+              f"completed on this PC. Next: cross-check the session with the other PC's ZIP.", flush=True)
     print(f"Sequence saved to: {path}", flush=True)
     return exit_code
 

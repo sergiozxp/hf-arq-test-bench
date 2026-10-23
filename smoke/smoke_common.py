@@ -504,6 +504,11 @@ class TcpCapture:
                                        f"({len(self.buf)} bytes pending)")
                 self.cond.wait(timeout=resto)
 
+    def holds(self, delimiter: bytes) -> bool:
+        """Whether unread data already contains delimiter."""
+        with self.cond:
+            return delimiter in self.buf
+
     def pending(self) -> int:
         with self.cond:
             return len(self.buf)

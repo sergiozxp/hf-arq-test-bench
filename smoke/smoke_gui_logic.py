@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 
-APP_VERSION = "0.2.0-alpha.4"
+APP_VERSION = "0.2.0-alpha.5"
 CALLSIGN_RE = re.compile(r"^[A-Z0-9/-]{3,12}$")
 BANDWIDTHS = ["BW500", "BW2300"]
 MODEMS = {"mercury": "Mercury 1.9.19", "vara": "VARA HF 4.9.0"}
@@ -113,7 +113,7 @@ def config_text(values: dict, session: dict | None = None, vara: dict | None = N
 results_dir = "results"
 payload_seed = 20261021
 max_payload_bytes = 1048576
-protocol_version = "5.2"
+protocol_version = "5.3"
 smoke_profile = "MS-1.0"
 app_version = {_toml_str(APP_VERSION)}
 
@@ -192,7 +192,23 @@ SEQUENCE = [
 ]
 SEQUENCE_GAP_S = 45
 CALIBRATION_TEST = "CAL  Bench calibration: both audio paths (modems stopped)"
-TEST_CHOICES = [SEQUENCE_TEST, CALIBRATION_TEST, *MERCURY_TESTS]
+
+# Phase 1 (protocol v5.3): one campaign cell = one condition and one load, N attempts with
+# the same-session ACK and a deadline. The tag carries the attempt number, which is also
+# the simulator's attempt number (and so the seeds).
+CAMPAIGN_LOADS = {"200B": 200, "10KiB": 10240}
+CAMPAIGN_DEADLINE_S = {"200B": 600, "10KiB": 3600}
+CAMPAIGN_LOAD_LABELS = {"200B": "200 B", "10KiB": "10 KiB"}
+CAMPAIGN_CONDITIONS = {"good": "Good", "moderate": "Moderate", "poor": "Poor"}
+KIT_TEST = "KIT  Minimum replication kit: Moderate, 200 B, 10 attempts"
+CAMPAIGN_TESTS = {KIT_TEST: dict(condition="moderate", load="200B", attempts=10)}
+for _cond, _label in CAMPAIGN_CONDITIONS.items():
+    for _load in CAMPAIGN_LOADS:
+        CAMPAIGN_TESTS[f"P1  {_label}, {CAMPAIGN_LOAD_LABELS[_load]}, 30 attempts"] = dict(
+            condition=_cond, load=_load, attempts=30)
+CAMPAIGN_GAP_S = SEQUENCE_GAP_S + 60     # every attempt ends with the same-session ACK
+
+TEST_CHOICES = [SEQUENCE_TEST, CALIBRATION_TEST, *CAMPAIGN_TESTS, *MERCURY_TESTS]
 SEQUENCE_LABEL = f"Start at step (1–{len(SEQUENCE)}):"
 SEQUENCE_HINT = ("Normally 1. Use a later step only to finish a stopped sequence; "
                  "use the same step on PC A and PC B.")
@@ -200,6 +216,24 @@ SEQUENCE_HINT = ("Normally 1. Use a later step only to finish a stopped sequence
 
 def is_sequence(test_name: str) -> bool:
     return test_name == SEQUENCE_TEST
+
+
+def is_campaign(test_name: str) -> bool:
+    return test_name in CAMPAIGN_TESTS
+
+
+def campaign_tag(condition: str, load: str, attempt: int) -> str:
+    return f"P1-{condition}-{load}-{attempt:02d}"
+
+
+def campaign_commands(role: str, test_name: str, start: int = 1) -> list[list[str]]:
+    cell = CAMPAIGN_TESTS[test_name]
+    mode = "send" if role == "A" else "listen"
+    command = ["smoke_sequence.py", mode, "--campaign", cell["condition"], "--load", cell["load"],
+               "--attempts", str(cell["attempts"]), "--from", str(start)]
+    if mode == "send":
+        command += ["--gap-s", f"{SEQUENCE_GAP_S:g}"]
+    return [command]
 
 
 def is_calibration(test_name: str) -> bool:
@@ -219,6 +253,10 @@ def test_tag(test_name: str, repetition: int) -> str:
         return sequence_label(repetition)
     if is_calibration(test_name):
         return "the bench calibration"
+    if is_campaign(test_name):
+        cell = CAMPAIGN_TESTS[test_name]
+        return (f"the Phase 1 cell {campaign_tag(cell['condition'], cell['load'], repetition)[:-3]}, "
+                f"attempts {repetition}–{cell['attempts']}")
     preset = MERCURY_TESTS[test_name]
     return preset["tag"].replace("{n}", str(repetition))
 
@@ -333,6 +371,11 @@ def summarize_sequence(report: dict) -> tuple[str, str]:
     """Summarise one PC's run of the full sequence."""
     side = "SENDER" if report.get("mode") == "send" else "RECEIVER"
     done, planned = report.get("completed_steps", 0), report.get("planned_steps", 0)
+    cell = report.get("campaign")
+    if cell:
+        return (f"CELL {cell['condition']} {cell['load']} FINISHED ({side}): {len(report.get('steps') or [])} "
+                f"attempt(s) run. Successes and failures are counted by the cross-check with the other PC's "
+                f"ZIP.", "orange")
     if report.get("outcome") == "completed":
         note = (" Delivery is verified only by the cross-check." if side == "SENDER"
                 else " Every payload hash verified.")
@@ -349,6 +392,21 @@ def summarize_report(report: dict) -> tuple[str, str]:
     """Summarise a session cross-check report (all pairs of one session)."""
     counts = report.get("counts") or {}
     parts = [f"{n} {outcome}" for outcome, n in sorted(counts.items())]
+    cells = report.get("cells") or []
+    if cells:
+        lines = []
+        for c in cells:
+            low, high = c["wilson_95"]
+            rate = "—" if c["success_rate"] is None else f"{c['success_rate'] * 100:.0f} %"
+            interval = "" if low is None else f" (95 % {low * 100:.0f}–{high * 100:.0f} %)"
+            med = "" if c["median_delivery_s"] is None else f", median {c['median_delivery_s']:.0f} s"
+            extra = f", {len(c['not_counted'])} not counted" if c["not_counted"] else ""
+            lines.append(f"{c['arm']} · {c['condition']} · {c['load']}: {c['successes']}/{c['counted']} = "
+                         f"{rate}{interval}{med}{extra}")
+        text = "PHASE 1 CELLS: " + "; ".join(lines)
+        if report.get("crossed_runs") or report.get("unpaired"):
+            text += ". Some runs are crossed or without a partner: see the log"
+        return text + ".", "green" if report.get("outcome") == "passed" else "orange"
     text = f"SESSION CROSS-CHECK: {len(report.get('pairs') or [])} pair(s): " + (", ".join(parts) or "none")
     crossed = report.get("crossed_runs") or []
     unpaired = report.get("unpaired") or []

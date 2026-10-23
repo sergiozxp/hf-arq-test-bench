@@ -204,7 +204,9 @@ def base_result(args, cfg, rlog, m) -> dict:
             "modem": modem, "arm": arm,
             "mycall": m["mycall"], "peer_call": m["peer_call"], "bw_command": m["bw_command"],
             "bw_when": args.bw_when, "payload_bytes_requested": args.payload_size,
-            "ack_mode": bool(getattr(args, "ack", False))}
+            "ack_mode": bool(getattr(args, "ack", False)),
+            "condition": getattr(args, "condition", None),
+            "deadline_s": getattr(args, "deadline_s", None)}
 
 
 def run_session_commands(cmd, profile, win, responses, failures, warnings) -> None:
@@ -234,6 +236,20 @@ def finish(res, cmd, m, responses, failures, warnings, idx_start) -> None:
     res["failures"] = failures
 
 
+def apply_deadline(m: dict, args, role: str) -> dict:
+    """Campaign attempts (protocol v5.3): every wait is bounded by the attempt deadline."""
+    deadline = getattr(args, "deadline_s", None)
+    if not deadline:
+        return m
+    m = dict(m)
+    if role == "send":
+        m.update(connect_timeout_s=deadline, transfer_timeout_s=deadline, ack_timeout_s=deadline)
+    else:
+        # B listens until A's deadline has surely passed, and tolerates long ARQ pauses.
+        m.update(listen_timeout_s=deadline + 300, idle_timeout_s=deadline, ack_timeout_s=deadline)
+    return m
+
+
 def wait_for_ack(res: dict, data: TcpCapture, header: bytes, payload_sha: str,
                  t_write_ns: int, timeout_s: float, failures: list[str]) -> None:
     """E0-3 sender: read B's ACK from the open session and check that it names this frame."""
@@ -243,7 +259,7 @@ def wait_for_ack(res: dict, data: TcpCapture, header: bytes, payload_sha: str,
         line = data.read_until(b"\n", timeout_s)
     except (TimeoutError, ConnectionError, ValueError) as e:
         failures.append(f"E0-3: no ACK from B in the open session ({e})")
-        return
+        return None
     t_ack = mono_ns()
     res["ack_line"] = line.decode("ascii", "replace").strip()
     res["ack_round_trip_s"] = seconds_between(t_write_ns, t_ack)
@@ -257,11 +273,13 @@ def wait_for_ack(res: dict, data: TcpCapture, header: bytes, payload_sha: str,
     extra = data.pending()
     if extra:
         failures.append(f"E0-3: {extra} unexpected bytes after the ACK on the data port")
+    return t_ack
 
 
 def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     m = tnc_config(cfg)
     _modem, profile, _arm = modem_identity(cfg)
+    m = apply_deadline(m, args, "send")
     req = profile["require_ok"]
     win = m["cmd_response_window_s"]
     seed = cfg["general"]["payload_seed"]
@@ -291,10 +309,20 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     idx0 = cmd.nlines()
     t_cmd = mono_ns()
     t_conn = None
+    deadline_s = getattr(args, "deadline_s", None)
+    end_ns = t_cmd + int(deadline_s * 1e9) if deadline_s else None
+
+    def bounded(limit_s: float) -> float:
+        if end_ns is None:
+            return limit_s
+        return max(0.0, min(limit_s, (end_ns - mono_ns()) / 1e9))
+
+    if deadline_s:
+        res["deadline_s"] = deadline_s
     if not failures:
         responses["connect"] = send_command(cmd, f"CONNECT {m['mycall']} {m['peer_call']}", win)
         if judge_command(responses["connect"], "CONNECT", failures, warnings, req):
-            r = cmd.wait_line(RX_CONNECTED, m["connect_timeout_s"], start=idx0)
+            r = cmd.wait_line(RX_CONNECTED, bounded(m["connect_timeout_s"]), start=idx0)
             if r is None:
                 failures.append("no CONNECTED event was observed")
             else:
@@ -313,8 +341,17 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                     failures.append(f"error while writing the data port: {e!r}")
                 t_w1 = mono_ns()
                 res["write_s"] = seconds_between(t_w0, t_w1)
-                b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", m["transfer_timeout_s"],
-                                         start=idx_w, t_min_ns=t_w0)
+                if args.ack:
+                    # B's ACK may arrive before the modem reports BUFFER 0: stop waiting then.
+                    b0 = None
+                    while bounded(m["transfer_timeout_s"]) > 0:
+                        b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", min(0.5, bounded(1e9)),
+                                                 start=idx_w, t_min_ns=t_w0)
+                        if b0 is not None or data.holds(b"\n") or data.closed:
+                            break
+                else:
+                    b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", bounded(m["transfer_timeout_s"]),
+                                             start=idx_w, t_min_ns=t_w0)
                 with cmd.cond:
                     buffers_ns = [(t, txt) for t, txt in cmd.lines[idx_w:]
                                   if re.search(RX_BUFFER, txt)]
@@ -329,11 +366,16 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                     res["arq_confirmed"] = True
                     res["t_transferencia_s"] = seconds_between(t_w0, b0[1][0])
                 if args.ack:
-                    wait_for_ack(res, data, header, res["payload_sha256"], t_w0,
-                                 m.get("ack_timeout_s", 300), failures)
+                    t_ack = wait_for_ack(res, data, header, res["payload_sha256"], t_w0,
+                                         bounded(m.get("ack_timeout_s", 300)), failures)
+                    if res.get("ack_verified"):
+                        res["delivery_time_s"] = seconds_between(t_cmd, t_ack)
                 # The session is active, so DISCONNECT must be accepted.
                 responses["disconnect"] = send_command(cmd, "DISCONNECT", win)
                 judge_command(responses["disconnect"], "DISCONNECT", failures, warnings, req)
+    if end_ns is not None and not res.get("ack_verified") and mono_ns() >= end_ns:
+        res["deadline_reached"] = True
+        failures.append(f"deadline of {deadline_s:.0f} s reached before a verified ACK")
     res["connection_s"] = seconds_between(t_cmd, t_conn)
     res["final_state"], res["cleanup_disconnect"] = ensure_disconnected(
         cmd, m["disconnect_wait_s"], idx0, win)
@@ -369,6 +411,7 @@ def send_ack(res: dict, cmd: TcpCapture, data: TcpCapture, header: bytes, sha: s
 def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     m = tnc_config(cfg)
     _modem, profile, _arm = modem_identity(cfg)
+    m = apply_deadline(m, args, "listen")
     req = profile["require_ok"]
     win = m["cmd_response_window_s"]
     seed = cfg["general"]["payload_seed"]
@@ -485,9 +528,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Modem smoke client (Mercury or VARA HF).")
     ap.add_argument("mode", choices=["send", "listen"])
     ap.add_argument("--config", default="smoke_config.toml")
-    ap.add_argument("--phase", choices=["e0", "smoke"], default="e0")
+    ap.add_argument("--phase", choices=["e0", "smoke", "p1"], default="e0")
     ap.add_argument("--tag", required=True, help="For example: E0-1_1KB, E0-2_V1, H1-1")
     ap.add_argument("--payload-size", type=int, default=200)
+    ap.add_argument("--deadline-s", type=float, default=None,
+                    help="Phase 1 attempt deadline from CONNECT (sender) and listening bound (receiver)")
+    ap.add_argument("--condition", default=None, help="Phase 1 channel condition, recorded in the result")
     ap.add_argument("--ack", action="store_true",
                     help="E0-3: B writes an ACK in the same session; A verifies it before DISCONNECT")
     ap.add_argument("--bw-when", choices=["before", "after", "none"], default="before",

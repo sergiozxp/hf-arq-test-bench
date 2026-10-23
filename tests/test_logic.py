@@ -36,7 +36,7 @@ check(
 )
 
 config = tomllib.loads(logic.config_text(values))
-check(config["general"]["protocol_version"] == "5.2", "protocol version is written")
+check(config["general"]["protocol_version"] == "5.3", "protocol version is written")
 check(config["general"]["smoke_profile"] == "MS-1.0", "smoke profile is written")
 check("pat" not in config and config["modem"] == {"name": "mercury", "arm": "Mercury 1.9.19"}, "Mercury configuration names the modem and arm")
 check(config["binaries"]["mercury_zip"] == values["mercury_zip"], "Windows path is preserved")
@@ -169,4 +169,15 @@ session = {"pairs": [{}], "counts": {"passed": 1}, "unpaired": [], "crossed_runs
            "stopped_runs": [{"dir": "x"}], "calibration": {"latest": {"A->B": {"sinad_db": 58.0, "verdict": "ok"}}}}
 text = logic.summarize(session)[0]
 check("1 stopped run" in text and "A->B SINAD 58.0" in text, "session summary lists stopped runs and calibration")
+
+# Phase 1 cells
+check(logic.TEST_CHOICES[2] == logic.KIT_TEST and len(logic.CAMPAIGN_TESTS) == 7, "kit and six campaign cells are offered")
+check(logic.campaign_tag("moderate", "200B", 7) == "P1-moderate-200B-07", "campaign tag carries condition, load and attempt")
+check(logic.campaign_commands("B", logic.KIT_TEST, 4) == [["smoke_sequence.py", "listen", "--campaign", "moderate",
+                                                        "--load", "200B", "--attempts", "10", "--from", "4"]],
+      "PC B runs the kit from attempt 4")
+check("--gap-s" in logic.campaign_commands("A", "P1  Poor, 10 KiB, 30 attempts")[0], "PC A runs a cell with its gap")
+check(logic.summarize({"mode": "send", "steps": [{}, {}], "completed_steps": 1, "planned_steps": 2,
+                       "outcome": "completed", "campaign": {"condition": "poor", "load": "200B"}})[0]
+      .startswith("CELL poor 200B FINISHED"), "a finished cell is summarised")
 print("ALL LOGIC TESTS PASSED")
