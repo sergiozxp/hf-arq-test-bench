@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a release with this tag (for example v0.2.0-alpha.3). Leave empty to only build."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -71,18 +76,39 @@ jobs:
             dist/SHA256SUMS.txt
 
   release:
-    if: startsWith(github.ref, 'refs/tags/')
+    # A pushed tag, or "Run workflow" on main with a release tag.
+    if: >-
+      startsWith(github.ref, 'refs/tags/') ||
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && github.ref == 'refs/heads/main')
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
     steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag against the application version
+        run: |
+          set -eu
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "Bad tag: $TAG"; exit 1; }
+          version=$(sed -n 's/^APP_VERSION = "\(.*\)"/\1/p' smoke/smoke_gui_logic.py)
+          [ "v$version" = "$TAG" ] || { echo "Tag $TAG does not match APP_VERSION $version"; exit 1; }
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && \
+             git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists"; exit 1
+          fi
+          case "$TAG" in *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV";; *) echo "PRERELEASE=false" >> "$GITHUB_ENV";; esac
       - uses: actions/download-artifact@v4
         with:
           name: HF-ARQ-Modem-Smoke
           path: release
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ env.TAG }}
+          prerelease: ${{ env.PRERELEASE }}
           generate_release_notes: true
           files: |
             release/HF-ARQ-Modem-Smoke.exe
