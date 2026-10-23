@@ -14,7 +14,7 @@ message-workflow behaviour.
 
 ## Status
 
-This is v0.2.0-alpha.4. The smoke GUI runs profile MS-1.0 (E0-1, E0-2, E0-3, H1) against
+This is v0.2.0-alpha.5. The smoke GUI runs profile MS-1.0 (E0-1, E0-2, E0-3, H1) against
 Mercury 1.9.19, which it starts from the verified official ZIP, and against VARA
 HF 4.9.0, which the operator opens. It shows Mercury's live levels, checks which
 program owns ports 8300 and 8301 before every test, and cross-checks a whole
@@ -27,10 +27,22 @@ installation, wiring and control of each arm; they are not performance results.
 With alpha.4 (protocol v5.2) the complete profile, including the same-session ACK
 (E0-3), passed 9/9 for each arm on 2026-10-23, and the bench calibration measured
 SNR 74/77 dB and SINAD 71/74 dB on the two audio paths. The channel simulator and
-performance results are not implemented yet.
+alpha.5 adds the Phase 1 channel simulator (protocol v5.3), still to be validated on
+the real bench: no performance result has been measured yet.
 
 The historical v0.1.0 release remains unchanged. It used the earlier Mercury
 plus Pat scope and is superseded for new work.
+
+### Changes in 0.2.0-alpha.5
+
+- Phase 1 channel simulator on PC B with a third UCA222 (Tools > Channel simulator):
+  two-path Watterson with ITU-R F.1487 delays and spreads, noise in 3 kHz referred
+  to the common transmit peak, published seeds per attempt, reference from the
+  calibration tone, dropout, clipping and peak checks.
+- Phase 1 cells (and the minimum replication kit): attempts with ACK and deadline,
+  matched with the simulator's attempts; the cell report gives success rate with a
+  95 % Wilson interval and the median delivery time.
+- Protocol v5.3; docs/phase1_channel_design.md and docs/phase1_guide.md.
 
 ### Changes in 0.2.0-alpha.4
 
@@ -71,6 +83,7 @@ plus Pat scope and is superseded for new work.
 - docs/modem_smoke_profile_ms1.md
 - docs/windows_modem_smoke_guide.md
 - docs/protocol_compatibility.md
+- docs/phase1_channel_design.md, docs/phase1_guide.md
 - smoke/: preflight scripts for Mercury 1.9.19 and VARA HF 4.9.0, and the Windows GUI
 
 ## Scope of the first benchmark table

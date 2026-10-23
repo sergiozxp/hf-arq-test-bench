@@ -1,6 +1,7 @@
 # Phase 1: simulated HF channel (design)
 
-Status: agreed design, 2026-10-23. Implemented from 0.2.0-alpha.5.
+Status: agreed design, 2026-10-23. Implemented from 0.2.0-alpha.5; operator steps
+in phase1_guide.md.
 
 Phase 1 builds and validates a reproducible HF channel between PC A and PC B, and
 then runs the comparative campaign through it. The design aims at two
@@ -79,9 +80,11 @@ Fading and noise are generated from seeds, the same for every arm and every benc
 spawned into three streams (path 1, path 2, noise). The simulator restarts both
 directions from attempt k's seeds when it hears the first A->B audio after at least
 30 s of silence, then counts k = 1, 2, ... for the cell. The campaign waits more than
-30 s between attempts. Each attempt start is logged with its time, so the
-cross-check verifies that every attempt of PC A has exactly one simulator attempt
-starting within 120 s after it; a mismatch flags the cell.
+30 s between attempts (105 s). Each attempt start is logged with its time. The
+cross-check matches it with PC B's run of the same attempt, on the same clock: the
+first simulator attempt that starts after PC B's run began listening. A missing
+attempt, another condition or another attempt number makes the pair not counted.
+(With an optional separate simulator PC, set its clock to PC B's before the campaign.)
 
 The common trace reduces the variance between arms; it does not make conditions
 identical, because each modem uses the channel for a different time.
@@ -107,8 +110,10 @@ same-session ACK (E0-3 procedure).
    separated by the programmed delay with equal mean power; the noise gives the
    programmed SNR within 0.2 dB; the same seed gives the same output.
 2. **CAL through the simulator in transparent mode** (Watterson and noise off), both
-   directions: level as expected, no clipping, SINAD >= 20 dB and zero dropouts; the
-   measured values are recorded. The simulator records P_ref in the same run.
+   directions: level as expected (12 dB below the direct cable), no clipping and zero
+   dropouts, with the CAL verdict "ok" (SNR >= 40 dB and SINAD >= 35 dB, above the
+   >= 20 dB the channel needs); the measured values are recorded. The simulator
+   records P_ref in the same run.
 3. **Complete smoke sequence** (9 tests) for the three arms through the transparent
    simulator.
 4. **Peak check:** each modem's peak at the simulator input within 1 dB of P_ref's peak.
