@@ -191,7 +191,8 @@ SEQUENCE = [
     (H1_TEST, 3),
 ]
 SEQUENCE_GAP_S = 45
-TEST_CHOICES = [SEQUENCE_TEST, *MERCURY_TESTS]
+CALIBRATION_TEST = "CAL  Bench calibration: both audio paths (modems stopped)"
+TEST_CHOICES = [SEQUENCE_TEST, CALIBRATION_TEST, *MERCURY_TESTS]
 SEQUENCE_LABEL = f"Start at step (1–{len(SEQUENCE)}):"
 SEQUENCE_HINT = ("Normally 1. Use a later step only to finish a stopped sequence; "
                  "use the same step on PC A and PC B.")
@@ -201,6 +202,14 @@ def is_sequence(test_name: str) -> bool:
     return test_name == SEQUENCE_TEST
 
 
+def is_calibration(test_name: str) -> bool:
+    return test_name == CALIBRATION_TEST
+
+
+def calibration_commands(role: str, input_device: str, output_device: str) -> list[list[str]]:
+    return [["bench_calibration.py", role, "--input", input_device, "--output", output_device]]
+
+
 def is_h1(test_name: str) -> bool:
     return bool(MERCURY_TESTS.get(test_name, {}).get("repeat"))
 
@@ -208,6 +217,8 @@ def is_h1(test_name: str) -> bool:
 def test_tag(test_name: str, repetition: int) -> str:
     if is_sequence(test_name):
         return sequence_label(repetition)
+    if is_calibration(test_name):
+        return "the bench calibration"
     preset = MERCURY_TESTS[test_name]
     return preset["tag"].replace("{n}", str(repetition))
 
@@ -256,6 +267,8 @@ def summarize(result: dict) -> tuple[str, str]:
         return summarize_report(result)
     if "planned_steps" in result and "steps" in result:
         return summarize_sequence(result)
+    if result.get("kind") == "bench_calibration":
+        return summarize_calibration(result)
     tag = result.get("tag") or result.get("sender_tag") or ""
     prefix = f"[{tag}] " if tag else ""
     incomplete = result.get("incomplete_evidence") or []
@@ -301,6 +314,21 @@ def summarize(result: dict) -> tuple[str, str]:
     return f"STEP FAILED: {result.get('reason', failures)}", "red"
 
 
+def summarize_calibration(record: dict) -> tuple[str, str]:
+    """Summarise the path this PC measured (it measures the signal it receives)."""
+    left = (record.get("channels") or {}).get("L") or {}
+    path = record.get("direction", "?")
+    if not left.get("tone_found"):
+        return (f"CALIBRATION {path}: NO TONE RECEIVED. Check the cable and that the other PC "
+                "started within the time window.", "red")
+    text = (f"CALIBRATION {path}: SNR {left.get('snr_db')} dB, SINAD {left.get('sinad_db')} dB, "
+            f"tone {left.get('tone_peak_dbfs')} dBFS peak, clock {left.get('clock_offset_ppm')} ppm. "
+            f"Simulated SNR usable up to {record.get('max_simulated_snr_db')} dB on this path.")
+    if record.get("verdict") == "ok":
+        return text, "green"
+    return text + " REVIEW: " + "; ".join(record.get("reasons") or []), "orange"
+
+
 def summarize_sequence(report: dict) -> tuple[str, str]:
     """Summarise one PC's run of the full sequence."""
     side = "SENDER" if report.get("mode") == "send" else "RECEIVER"
@@ -329,13 +357,21 @@ def summarize_report(report: dict) -> tuple[str, str]:
                  + "; ".join(f"{c['sender_tag']} / {c['receiver_tag']}" for c in crossed) + ")")
     if unpaired:
         text += f". {len(unpaired)} run(s) without a partner"
+    stopped = report.get("stopped_runs") or []
+    if stopped:
+        text += f". {len(stopped)} stopped run(s) without result.json"
+    latest = (report.get("calibration") or {}).get("latest") or {}
+    if latest:
+        text += ". Bench calibration: " + ", ".join(
+            f"{path} SINAD {item.get('sinad_db')} dB ({item.get('verdict')})"
+            for path, item in sorted(latest.items()))
     if report.get("outcome") == "passed" and not unpaired:
         return text + ".", "green"
     bad = any(k in counts for k in ("failed", "invalid_pair"))
     return text + ". See the table in the log.", "red" if bad else "orange"
 
 
-RESULT_PATH_RE = re.compile(r"(?:Result saved to:|Report saved to:|Sequence saved to:|->)\s*(.+\.json)\s*$")
+RESULT_PATH_RE = re.compile(r"(?:Result saved to:|Report saved to:|Sequence saved to:|Calibration saved to:|->)\s*(.+\.json)\s*$")
 
 
 def result_path_from_line(line: str) -> str | None:
@@ -347,6 +383,7 @@ SCRIPTS = {
     "mercury_smoke_client.py": "mercury_smoke_client",
     "smoke_cross_check.py": "smoke_cross_check",
     "smoke_sequence.py": "smoke_sequence",
+    "bench_calibration.py": "bench_calibration",
 }
 
 

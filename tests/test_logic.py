@@ -151,4 +151,22 @@ e03 = logic.MERCURY_TESTS["E0-3  Same-session ACK (200 bytes)"]
 check(logic.mercury_commands(e03, "A", 1)[0][-1] == "--ack" and logic.mercury_commands(e03, "B", 1)[0][-1] == "--ack",
       "E0-3 runs both sides with --ack")
 check("--ack" not in logic.mercury_commands(logic.MERCURY_TESTS[logic.H1_TEST], "A", 1)[0], "H1 has no ACK")
+
+cal_record = {"kind": "bench_calibration", "direction": "A->B", "verdict": "ok", "max_simulated_snr_db": 48.0,
+              "channels": {"L": {"tone_found": True, "snr_db": 70.1, "sinad_db": 58.0, "tone_peak_dbfs": -9.1,
+                                 "clock_offset_ppm": 12.0}}}
+text, color = logic.summarize(cal_record)
+check(color == "green" and "A->B" in text and "58.0" in text and "48.0" in text, "a calibration is summarised")
+check(logic.summarize(dict(cal_record, channels={"L": {"tone_found": False}}))[1] == "red", "no tone is red")
+check(logic.summarize(dict(cal_record, verdict="review", reasons=["clipped"]))[1] == "orange", "review is orange")
+check(logic.calibration_commands("B", "UCA222-B (USB Audio CODEC )", "UCA222-B (USB Audio CODEC )")[0][:2]
+      == ["bench_calibration.py", "B"], "calibration command")
+check(logic.TEST_CHOICES[1] == logic.CALIBRATION_TEST and not logic.is_h1(logic.CALIBRATION_TEST),
+      "the calibration is the second choice")
+check(logic.result_path_from_line("Calibration saved to: results/calibration/x/calibration.json")
+      == "results/calibration/x/calibration.json", "calibration path is parsed")
+session = {"pairs": [{}], "counts": {"passed": 1}, "unpaired": [], "crossed_runs": [], "outcome": "passed",
+           "stopped_runs": [{"dir": "x"}], "calibration": {"latest": {"A->B": {"sinad_db": 58.0, "verdict": "ok"}}}}
+text = logic.summarize(session)[0]
+check("1 stopped run" in text and "A->B SINAD 58.0" in text, "session summary lists stopped runs and calibration")
 print("ALL LOGIC TESTS PASSED")

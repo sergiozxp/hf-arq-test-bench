@@ -100,6 +100,31 @@ window._show_vara({"registered": False, "exe_sha256": "ab" * 32,
                   [], ["untick updates"], {"ok": True, "needs_confirmation": False, "message": "ok"})
 window._show_vara(None, ["VARA.exe not found"], [], None)
 
+# Calibration: refused while Mercury runs or a modem owns the ports; devices come from Mercury's selection.
+warnings_shown = []
+smoke_gui.messagebox.showwarning = lambda title, text: warnings_shown.append(title)
+window.values["role"].set("B")
+window.values["mycall"].set("XQ2CG-2")
+window.values["peer_call"].set("XQ2CG-1")
+window.values["bw"].set("BW500")
+window.test_name.set(smoke_gui.logic.CALIBRATION_TEST)
+window._test_changed()
+window.mercury.running = lambda: True
+window._run()
+assert warnings_shown[-1] == "Stop Mercury first", warnings_shown
+window.mercury.running = lambda: False
+smoke_gui.listeners_with_pid = lambda text, ports: {"8300": [{"pid": 99}], "8301": []}
+window._run()
+assert warnings_shown[-1] == "A modem is running", warnings_shown
+smoke_gui.listeners_with_pid = lambda text, ports: {"8300": [], "8301": []}
+window._run()
+assert warnings_shown[-1] == "Audio interface unknown", warnings_shown
+window.vara_info = {"settings": {"input_device": "UCA222-A (USB Audio CODEC )",
+                                 "output_device": "UCA222-A (USB Audio CODEC )"}}
+assert window.calibration_devices({}) == ("UCA222-A (USB Audio CODEC )", "UCA222-A (USB Audio CODEC )")
+window.test_name.set(smoke_gui.logic.SEQUENCE_TEST)
+window._test_changed()
+
 # The output of a full sequence: progress per test, a result per test, then the record.
 import json
 import tempfile

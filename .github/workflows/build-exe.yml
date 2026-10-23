@@ -56,6 +56,7 @@ jobs:
           python tests/test_vara.py
           python tests/test_simulated_gui.py
           python tests/test_receiver_rules.py
+          python tests/test_calibration.py
           python tests/test_launcher.py --launcher "python smoke/smoke_gui.py"
       - name: Download the official Mercury 1.9.19 Windows ZIP
         shell: pwsh

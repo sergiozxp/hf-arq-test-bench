@@ -108,6 +108,19 @@ write_run(b, "smoke", "H1-1", "20261022T183631Z", "0a2bac", receiver("H1-1"))
 (b / "mercury_sessions" / "x").mkdir(parents=True)
 (b / "mercury_sessions" / "x" / "result.json").write_text("{}", encoding="utf-8")
 
+# A run stopped by the operator (no result.json) and one calibration per PC.
+(b / "smoke" / "H1-2_20261022T184000Z_abcdef").mkdir(parents=True)
+(b / "smoke" / "H1-2_20261022T184000Z_abcdef" / "events.jsonl").write_text("{}", encoding="utf-8")
+for base, path, sinad, when in ((a, "B->A", 61.0, "2026-10-22T16:50:00+00:00"),
+                                (b, "A->B", 58.0, "2026-10-22T16:49:00+00:00"),
+                                (b, "A->B", 59.5, "2026-10-22T16:55:00+00:00")):
+    folder = base / "calibration" / (when[:19].replace(":", "") + path.replace("->", "to"))
+    folder.mkdir(parents=True)
+    (folder / "calibration.json").write_text(json.dumps({
+        "kind": "bench_calibration", "direction": path, "started_utc": when, "verdict": "ok",
+        "channels": {"L": {"tone_found": True, "snr_db": 70.0, "sinad_db": sinad}},
+        "max_simulated_snr_db": sinad - 10}), encoding="utf-8")
+
 archive = root / "results_B.zip"
 with zipfile.ZipFile(archive, "w") as z:
     for path in b.rglob("*"):
@@ -127,6 +140,11 @@ check(report["crossed_runs"] == [{"sender": "E0-2_V2_20261022T182553Z_04fe39",
                                   "sender_tag": "E0-2_V2", "receiver_tag": "H1-1"}],
       "the crossed run is reported")
 check(report["outcome"] == "review", "a session with a crossed run needs review")
+check(report["stopped_runs"] == [{"dir": "H1-2_20261022T184000Z_abcdef", "tag": "H1-2", "pc": "other PC"}],
+      "a stopped run without result.json is listed")
+latest = report["calibration"]["latest"]
+check(set(latest) == {"A->B", "B->A"} and latest["A->B"]["sinad_db"] == 59.5 and latest["B->A"]["pc"] == "this PC",
+      "the latest calibration of each path is in the session report")
 check((out / "cross_check_report.json").is_file() and (out / "cross_check_report.csv").is_file(),
       "the session report is written as JSON and CSV")
 extracted = out / "other_pc" / "results_B"

@@ -182,6 +182,42 @@ def find_runs(root: Path, origin: str) -> list[dict]:
     return runs
 
 
+def find_stopped_runs(root: Path, origin: str) -> list[dict]:
+    """Run folders that have an event log but no result.json (stopped or crashed runs)."""
+    stopped = []
+    for events in sorted(root.rglob("events.jsonl")):
+        relative = events.relative_to(root).parts
+        if "mercury_sessions" in relative or "cross_checks" in relative:
+            continue
+        match = RUN_DIR_RE.match(events.parent.name)
+        if match and not (events.parent / "result.json").exists():
+            stopped.append({"dir": events.parent.name, "tag": match.group("tag"), "pc": origin})
+    return stopped
+
+
+def find_calibrations(root: Path, origin: str) -> list[dict]:
+    """Bench calibration records (results/calibration/<time>_<path>/calibration.json)."""
+    found = []
+    for path in sorted(root.rglob("calibration.json")):
+        if "cross_checks" in path.relative_to(root).parts:
+            continue
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if record.get("kind") != "bench_calibration":
+            continue
+        left = (record.get("channels") or {}).get("L") or {}
+        found.append({"pc": origin, "dir": path.parent.name, "direction": record.get("direction"),
+                      "started_utc": record.get("started_utc"), "verdict": record.get("verdict"),
+                      "snr_db": left.get("snr_db"), "sinad_db": left.get("sinad_db"),
+                      "tone_peak_dbfs": left.get("tone_peak_dbfs"),
+                      "clock_offset_ppm": left.get("clock_offset_ppm"),
+                      "max_simulated_snr_db": record.get("max_simulated_snr_db"),
+                      "reasons": record.get("reasons")})
+    return found
+
+
 def pair_runs(runs: list[dict]) -> tuple[list[tuple[dict, dict]], list[dict], list[dict]]:
     """Pair senders with receivers by tag and start time.
 
@@ -241,7 +277,15 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
         "unpaired": [{"dir": u["dir"], "tag": u["tag"], "mode": u["mode"], "pc": u["origin"]}
                      for u in unpaired],
         "crossed_runs": crossed,
+        "stopped_runs": find_stopped_runs(local, "this PC") + find_stopped_runs(other, "other PC"),
     }
+    calibrations = find_calibrations(local, "this PC") + find_calibrations(other, "other PC")
+    latest: dict[str, dict] = {}
+    for item in calibrations:
+        if item["direction"] and (item["direction"] not in latest
+                                  or (item["started_utc"] or "") > (latest[item["direction"]]["started_utc"] or "")):
+            latest[item["direction"]] = item
+    report["calibration"] = {"latest": latest, "all": calibrations}
     report["outcome"] = ("passed" if rows and set(counts) == {"passed"} and not crossed
                          else "review")
     out_dir.mkdir(parents=True, exist_ok=True)
