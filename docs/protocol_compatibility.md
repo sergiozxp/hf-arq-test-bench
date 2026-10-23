@@ -41,6 +41,13 @@ cables changed nothing, and swapping the roles of the two PCs (2026-10-23 02:55 
 H1-1) moved the 11–12 dB readings to the PC that received the data. `SN` is therefore
 not used to calibrate the bench.
 
+Bench calibration with the bench's own signal (app 0.2.0-alpha.4, 2026-10-23 03:54 UTC,
+clean cable, Windows levels 100/54, left channel): A->B SNR 74.1 dB, SINAD 71.2 dB;
+B->A SNR 77.5 dB, SINAD 73.8 dB; tone received at -6.7 dBFS peak for -6.0 dBFS sent
+in both directions; no clipping; the two sound cards differ by 12.3 ppm (+12.3 and
+-12.3 as seen from each side). Both paths are usable for simulated SNRs up to about
+61 dB, far above any HF condition, so the bench does not limit the modems.
+
 VARA evidence: smoke test of 2026-10-22, VARA HF 4.9.0 unlicensed on both PCs
 (VARA.exe SHA-256 c69b8c81…f00486f), app 0.2.0-alpha.3, protocol 5.1: E0-1 (16 B,
 1 KiB, 10 KiB), E0-2 V1 and V2, H1 ×3, 8 pairs passed. In BW500 the unregistered
