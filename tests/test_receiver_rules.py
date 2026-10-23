@@ -46,4 +46,14 @@ result = cc.cross_check(sender, receiver)
 check(result["outcome"] == "procedure_fault", "the cross-check counts it as a procedure fault, not a modem failure")
 check(logic.summarize(result)[1] == "orange" and "PROCEDURE" in logic.summarize(result)[0],
       "the GUI explains it")
+
+# Same-session ACK grammar (protocol v5.2).
+from smoke_common import ack_run, make_ack, make_header, make_payload, parse_ack, sha256_bytes
+payload = make_payload(200, 20261021)
+header = make_header(payload)
+ack = make_ack(header, sha256_bytes(payload))
+check(ack.endswith(b"\n") and len(ack) == len(b"ACK run=") + 12 + len(b" SHA256=") + 16 + 1, "ACK has the fixed form")
+check(parse_ack(ack) == {"run": ack_run(header), "sha256_16": sha256_bytes(payload)[:16]}, "ACK parses back")
+check(parse_ack(b"ACK run=XYZ SHA256=1") is None and parse_ack("hello") is None, "anything else is not an ACK")
+check(ack_run(make_header(make_payload(1024, 20261021))) != ack_run(header), "the run field names the frame")
 print("ALL RECEIVER RULE TESTS PASSED")

@@ -87,6 +87,27 @@ def parse_header(h: bytes) -> tuple[int, bytes]:
     return struct.unpack(">Q", h[:8])[0], h[8:16]
 
 
+# Same-session ACK (protocol v5.2, test E0-3): B writes, on the data port of the open
+# ARQ session, "ACK run=<12-hex> SHA256=<first-16-hex>\n". run is the first 12 hex
+# digits of the SHA-256 of the 16-byte frame header, so the ACK names the exact frame
+# it confirms and A can check it without any other shared state.
+ACK_RE = re.compile(r"^ACK run=([0-9a-f]{12}) SHA256=([0-9a-f]{16})$")
+
+
+def ack_run(header: bytes) -> str:
+    return hashlib.sha256(header[:HEADER_LEN]).hexdigest()[:12]
+
+
+def make_ack(header: bytes, payload_sha256_hex: str) -> bytes:
+    return f"ACK run={ack_run(header)} SHA256={payload_sha256_hex[:16]}\n".encode("ascii")
+
+
+def parse_ack(line: bytes | str) -> dict | None:
+    text = line.decode("ascii", "replace") if isinstance(line, bytes) else line
+    match = ACK_RE.match(text.strip())
+    return {"run": match.group(1), "sha256_16": match.group(2)} if match else None
+
+
 # ---------------------------------------------------------------- run evidence
 class RunLog:
     def __init__(self, cfg: dict, phase: str, tag: str):
@@ -461,6 +482,27 @@ class TcpCapture:
             salida = bytes(self.buf[:n])
             del self.buf[:n]
             return salida
+
+    def read_until(self, delimiter: bytes, timeout_s: float, max_bytes: int = 4096) -> bytes:
+        """Read up to and including delimiter within timeout_s (total, not idle)."""
+        limite = time.monotonic() + timeout_s
+        with self.cond:
+            while True:
+                pos = self.buf.find(delimiter)
+                if pos >= 0:
+                    salida = bytes(self.buf[:pos + len(delimiter)])
+                    del self.buf[:pos + len(delimiter)]
+                    return salida
+                if len(self.buf) > max_bytes:
+                    raise ValueError(f"{len(self.buf)} bytes without {delimiter!r}")
+                if self.closed:
+                    raise ConnectionError(f"socket closed while waiting for {delimiter!r} "
+                                          f"(reader error: {self.error})")
+                resto = limite - time.monotonic()
+                if resto <= 0:
+                    raise TimeoutError(f"{timeout_s} s without {delimiter!r} "
+                                       f"({len(self.buf)} bytes pending)")
+                self.cond.wait(timeout=resto)
 
     def pending(self) -> int:
         with self.cond:

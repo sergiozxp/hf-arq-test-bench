@@ -1,11 +1,11 @@
 """Run the whole MS-1.0 sequence on one PC: E0-1 (16 B, 1 KiB, 10 KiB), E0-2 V1 and
-V2, and H1 repetitions 1, 2 and 3, in that fixed order.
+V2, E0-3 (same-session ACK), and H1 repetitions 1, 2 and 3, in that fixed order.
 
 USAGE
   PC B (receiver), started first:  python smoke_sequence.py listen
   PC A (sender), started when B shows waiting_for_connection:
                                    python smoke_sequence.py send
-  Options: --config smoke_config.toml, --from <step 1..8>, --gap-s <seconds>
+  Options: --config smoke_config.toml, --from <step 1..9>, --gap-s <seconds>
 
 HOW THE TWO PCs STAY IN STEP
   The PCs share no network during the test, so each follows the same fixed script.
@@ -55,7 +55,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Run the full MS-1.0 smoke sequence on one PC.")
     ap.add_argument("mode", choices=["send", "listen"])
     ap.add_argument("--config", default="smoke_config.toml")
-    ap.add_argument("--from", dest="start", type=int, default=1, help="first step (1-8)")
+    ap.add_argument("--from", dest="start", type=int, default=1, help="first step (1-9)")
     ap.add_argument("--gap-s", type=float, default=DEFAULT_GAP_S,
                     help="sender only: seconds to wait between tests")
     args = ap.parse_args()

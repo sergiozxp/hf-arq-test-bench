@@ -73,6 +73,9 @@ def pair_mismatches(em: dict, rx: dict) -> list[str]:
             continue
         if a != b:
             reasons.append(f"different {label}: {a} / {b}")
+    if bool(em.get("ack_mode")) != bool(rx.get("ack_mode")):
+        reasons.append(f"same-session ACK on one side only: sender {bool(em.get('ack_mode'))}, "
+                       f"receiver {bool(rx.get('ack_mode'))}")
     if em.get("mycall") and rx.get("mycall"):
         dest = _get(em, "destination", "peer_call")
         if dest and dest.upper() != rx["mycall"].upper():
@@ -120,6 +123,17 @@ def cross_check(em: dict, rx: dict) -> dict:
         "smoke_profile": em.get("smoke_profile") or rx.get("smoke_profile"),
     }
     delivered = bool(hash_ok and rx.get("delivered_intact") and em.get("sender_completed"))
+    if em.get("ack_mode"):
+        # E0-3: delivery also requires A to have verified B's ACK in the same session.
+        result["sender_ack_verified"] = em.get("ack_verified")
+        result["ack_round_trip_s"] = em.get("ack_round_trip_s")
+        result["receiver_ack_sent"] = rx.get("ack_sent")
+        if em.get("ack_verified") is not True:
+            warnings.append("E0-3: A did not verify B's ACK in the same session")
+        if rx.get("ack_line") and em.get("ack_line") and rx["ack_line"] != em["ack_line"]:
+            warnings.append("E0-3: the ACK read by A differs from the ACK written by B")
+            delivered = False
+        delivered = delivered and em.get("ack_verified") is True
     if mismatches:
         result["outcome"] = "invalid_pair"
     elif em.get("infrastructure_fault") or rx.get("infrastructure_fault"):

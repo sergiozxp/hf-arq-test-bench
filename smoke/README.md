@@ -29,7 +29,7 @@ Then run the sender:
 
     python mercury_smoke_client.py send --tag E0-1_1KiB --payload-size 1024
 
-Or run the whole MS-1.0 sequence (8 tests) with one command per PC, receiver first:
+Or run the whole MS-1.0 sequence (9 tests) with one command per PC, receiver first:
 
     python smoke_sequence.py listen
     python smoke_sequence.py send --gap-s 45

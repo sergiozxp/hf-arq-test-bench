@@ -66,6 +66,16 @@ check(cc.cross_check(sender("H1-1"), receiver("H1-1", infrastructure_fault=True)
 check(cc.cross_check(sender("H1-1"), receiver("H1-1", incomplete_evidence=["x"]))["outcome"] == "incomplete",
       "missing evidence is incomplete")
 
+# E0-3: the pair passes only when A verified B's ACK in the same session.
+ack_line = "ACK run=0123456789ab SHA256=2ad94260f24729d5"
+es = sender("E0-3_ACK", ack_mode=True, ack_verified=True, ack_line=ack_line, ack_round_trip_s=30.0)
+er = receiver("E0-3_ACK", ack_mode=True, ack_sent=True, ack_line=ack_line)
+check(cc.cross_check(es, er)["outcome"] == "passed", "E0-3 with a verified ACK passes")
+check(cc.cross_check(dict(es, ack_verified=False), er)["outcome"] == "failed", "E0-3 without a verified ACK fails")
+check(cc.cross_check(es, receiver("E0-3_ACK"))["outcome"] == "invalid_pair", "ACK on one side only is an invalid pair")
+check(cc.cross_check(es, dict(er, ack_line="ACK run=ffffffffffff SHA256=2ad94260f24729d5"))["outcome"] == "failed",
+      "an ACK that differs between A and B fails")
+
 vs = sender("H1-1", modem="vara", arm="VARA HF licensed")
 vr = receiver("H1-1", modem="vara", arm="VARA HF licensed", link_stats={"link_state": "unregistered"})
 check(any("unregistered link" in w for w in cc.cross_check(vs, vr)["warnings"]),

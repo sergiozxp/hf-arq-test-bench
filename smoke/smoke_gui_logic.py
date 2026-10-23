@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 
-APP_VERSION = "0.2.0-alpha.3"
+APP_VERSION = "0.2.0-alpha.4"
 CALLSIGN_RE = re.compile(r"^[A-Z0-9/-]{3,12}$")
 BANDWIDTHS = ["BW500", "BW2300"]
 MODEMS = {"mercury": "Mercury 1.9.19", "vara": "VARA HF 4.9.0"}
@@ -113,7 +113,7 @@ def config_text(values: dict, session: dict | None = None, vara: dict | None = N
 results_dir = "results"
 payload_seed = 20261021
 max_payload_bytes = 1048576
-protocol_version = "5.1"
+protocol_version = "5.2"
 smoke_profile = "MS-1.0"
 app_version = {_toml_str(APP_VERSION)}
 
@@ -135,6 +135,7 @@ transfer_timeout_s = 1800
 idle_timeout_s = 60
 extra_bytes_grace_s = 5
 disconnect_wait_s = 60
+ack_timeout_s = 600
 session_tolerance_ms = 50
 error_patterns = []
 
@@ -163,6 +164,8 @@ MERCURY_TESTS = {
     "E0-1  10 KiB payload": dict(phase="e0", tag="E0-1_10KiB", size=10240, bw_when="before"),
     "E0-2  Variant V1: BW before connect": dict(phase="e0", tag="E0-2_V1", size=200, bw_when="before"),
     "E0-2  Variant V2: BW after connect": dict(phase="e0", tag="E0-2_V2", size=200, bw_when="after"),
+    "E0-3  Same-session ACK (200 bytes)": dict(phase="e0", tag="E0-3_ACK", size=200, bw_when="before",
+                                               ack=True),
     "H1  Formal 200-byte transfer": dict(phase="smoke", tag="H1-{n}", size=200, bw_when="before", repeat=True),
 }
 # E0-2 V3 ("receiver listens first") was removed in 0.2.0-alpha.2: every test
@@ -174,21 +177,22 @@ REPETITION_HINT = "Run H1 three times: 1, then 2, then 3. Use the same number on
 
 TESTS = MERCURY_TESTS  # the same procedure for every modem
 
-# The whole MS-1.0 sequence in its fixed order (0.2.0-alpha.3): one RUN per PC.
-SEQUENCE_TEST = "ALL  Full sequence: the 8 tests in order (recommended)"
+# The whole MS-1.0 sequence in its fixed order (0.2.0-alpha.3; E0-3 from alpha.4): one RUN per PC.
+SEQUENCE_TEST = "ALL  Full sequence: the 9 tests in order (recommended)"
 SEQUENCE = [
     ("E0-1  16-byte payload", 1),
     ("E0-1  1 KiB payload", 1),
     ("E0-1  10 KiB payload", 1),
     ("E0-2  Variant V1: BW before connect", 1),
     ("E0-2  Variant V2: BW after connect", 1),
+    ("E0-3  Same-session ACK (200 bytes)", 1),
     (H1_TEST, 1),
     (H1_TEST, 2),
     (H1_TEST, 3),
 ]
 SEQUENCE_GAP_S = 45
 TEST_CHOICES = [SEQUENCE_TEST, *MERCURY_TESTS]
-SEQUENCE_LABEL = "Start at step (1–8):"
+SEQUENCE_LABEL = f"Start at step (1–{len(SEQUENCE)}):"
 SEQUENCE_HINT = ("Normally 1. Use a later step only to finish a stopped sequence; "
                  "use the same step on PC A and PC B.")
 
@@ -240,7 +244,7 @@ def mercury_commands(preset: dict, role: str, repeat: int) -> list[list[str]]:
         "mercury_smoke_client.py", mode, "--tag", tag,
         "--phase", preset["phase"], "--payload-size", str(preset["size"]),
         "--bw-when", preset["bw_when"],
-    ]]
+    ] + (["--ack"] if preset.get("ack") else [])]
 
 
 def summarize(result: dict) -> tuple[str, str]:
