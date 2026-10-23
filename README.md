@@ -20,10 +20,12 @@ HF 4.9.0, which the operator opens. It shows Mercury's live levels, checks which
 program owns ports 8300 and 8301 before every test, and cross-checks a whole
 session against the other PC's results ZIP.
 
-The Mercury smoke test (E0-1, E0-2, H1) passed between two real PCs on
-2026-10-22 with alpha.2. VARA support is new in alpha.3 and has been tested only
-against a simulator. The common benchmark client (E0-3), the channel simulator and
-performance results are not implemented yet.
+Smoke results on real hardware (two PCs, direct audio cable, BW500), all with
+alpha.3: Mercury 1.9.19 8/8 pairs passed, VARA HF 4.9.0 unlicensed 8/8, VARA HF
+4.9.0 licensed 8/8 (details in docs/protocol_compatibility.md). These validate the
+installation, wiring and control of each arm; they are not performance results.
+The same-session ACK (E0-3), the common benchmark client, the channel simulator and
+performance results are not implemented yet, so the smoke profile is partial.
 
 The historical v0.1.0 release remains unchanged. It used the earlier Mercury
 plus Pat scope and is superseded for new work.
@@ -81,3 +83,7 @@ workflow tests and builds the executable, checks that the tag matches
 `APP_VERSION` and does not exist yet, then creates the tag and the release with
 `HF-ARQ-Modem-Smoke.exe` and `SHA256SUMS.txt`. Tags with a suffix (`-alpha.N`)
 are published as pre-releases. Pushing a `v*` tag still publishes as before.
+
+The release notes are taken from `docs/releases/<tag>.md` when that file exists.
+To replace the notes of an existing release, run the same workflow with only
+**notes_tag** filled in.
