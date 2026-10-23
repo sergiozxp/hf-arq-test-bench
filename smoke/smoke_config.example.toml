@@ -5,7 +5,7 @@
 results_dir = "results"
 payload_seed = 20261021
 max_payload_bytes = 1048576
-protocol_version = "5.1"
+protocol_version = "5.2"
 smoke_profile = "MS-1.0"
 app_version = "0.2.0-alpha.3"
 
@@ -27,6 +27,7 @@ transfer_timeout_s = 1800
 idle_timeout_s = 60
 extra_bytes_grace_s = 5
 disconnect_wait_s = 60
+ack_timeout_s = 600         # E0-3: time for B's ACK to come back in the same session
 session_tolerance_ms = 50
 error_patterns = []
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 
-APP_VERSION = "0.2.0-alpha.3"
+APP_VERSION = "0.2.0-alpha.4"
 CALLSIGN_RE = re.compile(r"^[A-Z0-9/-]{3,12}$")
 BANDWIDTHS = ["BW500", "BW2300"]
 MODEMS = {"mercury": "Mercury 1.9.19", "vara": "VARA HF 4.9.0"}
@@ -113,7 +113,7 @@ def config_text(values: dict, session: dict | None = None, vara: dict | None = N
 results_dir = "results"
 payload_seed = 20261021
 max_payload_bytes = 1048576
-protocol_version = "5.1"
+protocol_version = "5.2"
 smoke_profile = "MS-1.0"
 app_version = {_toml_str(APP_VERSION)}
 
@@ -135,6 +135,7 @@ transfer_timeout_s = 1800
 idle_timeout_s = 60
 extra_bytes_grace_s = 5
 disconnect_wait_s = 60
+ack_timeout_s = 600
 session_tolerance_ms = 50
 error_patterns = []
 
@@ -163,6 +164,8 @@ MERCURY_TESTS = {
     "E0-1  10 KiB payload": dict(phase="e0", tag="E0-1_10KiB", size=10240, bw_when="before"),
     "E0-2  Variant V1: BW before connect": dict(phase="e0", tag="E0-2_V1", size=200, bw_when="before"),
     "E0-2  Variant V2: BW after connect": dict(phase="e0", tag="E0-2_V2", size=200, bw_when="after"),
+    "E0-3  Same-session ACK (200 bytes)": dict(phase="e0", tag="E0-3_ACK", size=200, bw_when="before",
+                                               ack=True),
     "H1  Formal 200-byte transfer": dict(phase="smoke", tag="H1-{n}", size=200, bw_when="before", repeat=True),
 }
 # E0-2 V3 ("receiver listens first") was removed in 0.2.0-alpha.2: every test
@@ -174,27 +177,37 @@ REPETITION_HINT = "Run H1 three times: 1, then 2, then 3. Use the same number on
 
 TESTS = MERCURY_TESTS  # the same procedure for every modem
 
-# The whole MS-1.0 sequence in its fixed order (0.2.0-alpha.3): one RUN per PC.
-SEQUENCE_TEST = "ALL  Full sequence: the 8 tests in order (recommended)"
+# The whole MS-1.0 sequence in its fixed order (0.2.0-alpha.3; E0-3 from alpha.4): one RUN per PC.
+SEQUENCE_TEST = "ALL  Full sequence: the 9 tests in order (recommended)"
 SEQUENCE = [
     ("E0-1  16-byte payload", 1),
     ("E0-1  1 KiB payload", 1),
     ("E0-1  10 KiB payload", 1),
     ("E0-2  Variant V1: BW before connect", 1),
     ("E0-2  Variant V2: BW after connect", 1),
+    ("E0-3  Same-session ACK (200 bytes)", 1),
     (H1_TEST, 1),
     (H1_TEST, 2),
     (H1_TEST, 3),
 ]
 SEQUENCE_GAP_S = 45
-TEST_CHOICES = [SEQUENCE_TEST, *MERCURY_TESTS]
-SEQUENCE_LABEL = "Start at step (1–8):"
+CALIBRATION_TEST = "CAL  Bench calibration: both audio paths (modems stopped)"
+TEST_CHOICES = [SEQUENCE_TEST, CALIBRATION_TEST, *MERCURY_TESTS]
+SEQUENCE_LABEL = f"Start at step (1–{len(SEQUENCE)}):"
 SEQUENCE_HINT = ("Normally 1. Use a later step only to finish a stopped sequence; "
                  "use the same step on PC A and PC B.")
 
 
 def is_sequence(test_name: str) -> bool:
     return test_name == SEQUENCE_TEST
+
+
+def is_calibration(test_name: str) -> bool:
+    return test_name == CALIBRATION_TEST
+
+
+def calibration_commands(role: str, input_device: str, output_device: str) -> list[list[str]]:
+    return [["bench_calibration.py", role, "--input", input_device, "--output", output_device]]
 
 
 def is_h1(test_name: str) -> bool:
@@ -204,6 +217,8 @@ def is_h1(test_name: str) -> bool:
 def test_tag(test_name: str, repetition: int) -> str:
     if is_sequence(test_name):
         return sequence_label(repetition)
+    if is_calibration(test_name):
+        return "the bench calibration"
     preset = MERCURY_TESTS[test_name]
     return preset["tag"].replace("{n}", str(repetition))
 
@@ -240,7 +255,7 @@ def mercury_commands(preset: dict, role: str, repeat: int) -> list[list[str]]:
         "mercury_smoke_client.py", mode, "--tag", tag,
         "--phase", preset["phase"], "--payload-size", str(preset["size"]),
         "--bw-when", preset["bw_when"],
-    ]]
+    ] + (["--ack"] if preset.get("ack") else [])]
 
 
 def summarize(result: dict) -> tuple[str, str]:
@@ -252,6 +267,8 @@ def summarize(result: dict) -> tuple[str, str]:
         return summarize_report(result)
     if "planned_steps" in result and "steps" in result:
         return summarize_sequence(result)
+    if result.get("kind") == "bench_calibration":
+        return summarize_calibration(result)
     tag = result.get("tag") or result.get("sender_tag") or ""
     prefix = f"[{tag}] " if tag else ""
     incomplete = result.get("incomplete_evidence") or []
@@ -297,6 +314,21 @@ def summarize(result: dict) -> tuple[str, str]:
     return f"STEP FAILED: {result.get('reason', failures)}", "red"
 
 
+def summarize_calibration(record: dict) -> tuple[str, str]:
+    """Summarise the path this PC measured (it measures the signal it receives)."""
+    left = (record.get("channels") or {}).get("L") or {}
+    path = record.get("direction", "?")
+    if not left.get("tone_found"):
+        return (f"CALIBRATION {path}: NO TONE RECEIVED. Check the cable and that the other PC "
+                "started within the time window.", "red")
+    text = (f"CALIBRATION {path}: SNR {left.get('snr_db')} dB, SINAD {left.get('sinad_db')} dB, "
+            f"tone {left.get('tone_peak_dbfs')} dBFS peak, clock {left.get('clock_offset_ppm')} ppm. "
+            f"Simulated SNR usable up to {record.get('max_simulated_snr_db')} dB on this path.")
+    if record.get("verdict") == "ok":
+        return text, "green"
+    return text + " REVIEW: " + "; ".join(record.get("reasons") or []), "orange"
+
+
 def summarize_sequence(report: dict) -> tuple[str, str]:
     """Summarise one PC's run of the full sequence."""
     side = "SENDER" if report.get("mode") == "send" else "RECEIVER"
@@ -325,13 +357,21 @@ def summarize_report(report: dict) -> tuple[str, str]:
                  + "; ".join(f"{c['sender_tag']} / {c['receiver_tag']}" for c in crossed) + ")")
     if unpaired:
         text += f". {len(unpaired)} run(s) without a partner"
+    stopped = report.get("stopped_runs") or []
+    if stopped:
+        text += f". {len(stopped)} stopped run(s) without result.json"
+    latest = (report.get("calibration") or {}).get("latest") or {}
+    if latest:
+        text += ". Bench calibration: " + ", ".join(
+            f"{path} SINAD {item.get('sinad_db')} dB ({item.get('verdict')})"
+            for path, item in sorted(latest.items()))
     if report.get("outcome") == "passed" and not unpaired:
         return text + ".", "green"
     bad = any(k in counts for k in ("failed", "invalid_pair"))
     return text + ". See the table in the log.", "red" if bad else "orange"
 
 
-RESULT_PATH_RE = re.compile(r"(?:Result saved to:|Report saved to:|Sequence saved to:|->)\s*(.+\.json)\s*$")
+RESULT_PATH_RE = re.compile(r"(?:Result saved to:|Report saved to:|Sequence saved to:|Calibration saved to:|->)\s*(.+\.json)\s*$")
 
 
 def result_path_from_line(line: str) -> str | None:
@@ -343,6 +383,7 @@ SCRIPTS = {
     "mercury_smoke_client.py": "mercury_smoke_client",
     "smoke_cross_check.py": "smoke_cross_check",
     "smoke_sequence.py": "smoke_sequence",
+    "bench_calibration.py": "bench_calibration",
 }
 
 

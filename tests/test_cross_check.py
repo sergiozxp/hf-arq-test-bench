@@ -66,6 +66,16 @@ check(cc.cross_check(sender("H1-1"), receiver("H1-1", infrastructure_fault=True)
 check(cc.cross_check(sender("H1-1"), receiver("H1-1", incomplete_evidence=["x"]))["outcome"] == "incomplete",
       "missing evidence is incomplete")
 
+# E0-3: the pair passes only when A verified B's ACK in the same session.
+ack_line = "ACK run=0123456789ab SHA256=2ad94260f24729d5"
+es = sender("E0-3_ACK", ack_mode=True, ack_verified=True, ack_line=ack_line, ack_round_trip_s=30.0)
+er = receiver("E0-3_ACK", ack_mode=True, ack_sent=True, ack_line=ack_line)
+check(cc.cross_check(es, er)["outcome"] == "passed", "E0-3 with a verified ACK passes")
+check(cc.cross_check(dict(es, ack_verified=False), er)["outcome"] == "failed", "E0-3 without a verified ACK fails")
+check(cc.cross_check(es, receiver("E0-3_ACK"))["outcome"] == "invalid_pair", "ACK on one side only is an invalid pair")
+check(cc.cross_check(es, dict(er, ack_line="ACK run=ffffffffffff SHA256=2ad94260f24729d5"))["outcome"] == "failed",
+      "an ACK that differs between A and B fails")
+
 vs = sender("H1-1", modem="vara", arm="VARA HF licensed")
 vr = receiver("H1-1", modem="vara", arm="VARA HF licensed", link_stats={"link_state": "unregistered"})
 check(any("unregistered link" in w for w in cc.cross_check(vs, vr)["warnings"]),
@@ -98,6 +108,19 @@ write_run(b, "smoke", "H1-1", "20261022T183631Z", "0a2bac", receiver("H1-1"))
 (b / "mercury_sessions" / "x").mkdir(parents=True)
 (b / "mercury_sessions" / "x" / "result.json").write_text("{}", encoding="utf-8")
 
+# A run stopped by the operator (no result.json) and one calibration per PC.
+(b / "smoke" / "H1-2_20261022T184000Z_abcdef").mkdir(parents=True)
+(b / "smoke" / "H1-2_20261022T184000Z_abcdef" / "events.jsonl").write_text("{}", encoding="utf-8")
+for base, path, sinad, when in ((a, "B->A", 61.0, "2026-10-22T16:50:00+00:00"),
+                                (b, "A->B", 58.0, "2026-10-22T16:49:00+00:00"),
+                                (b, "A->B", 59.5, "2026-10-22T16:55:00+00:00")):
+    folder = base / "calibration" / (when[:19].replace(":", "") + path.replace("->", "to"))
+    folder.mkdir(parents=True)
+    (folder / "calibration.json").write_text(json.dumps({
+        "kind": "bench_calibration", "direction": path, "started_utc": when, "verdict": "ok",
+        "channels": {"L": {"tone_found": True, "snr_db": 70.0, "sinad_db": sinad}},
+        "max_simulated_snr_db": sinad - 10}), encoding="utf-8")
+
 archive = root / "results_B.zip"
 with zipfile.ZipFile(archive, "w") as z:
     for path in b.rglob("*"):
@@ -117,6 +140,11 @@ check(report["crossed_runs"] == [{"sender": "E0-2_V2_20261022T182553Z_04fe39",
                                   "sender_tag": "E0-2_V2", "receiver_tag": "H1-1"}],
       "the crossed run is reported")
 check(report["outcome"] == "review", "a session with a crossed run needs review")
+check(report["stopped_runs"] == [{"dir": "H1-2_20261022T184000Z_abcdef", "tag": "H1-2", "pc": "other PC"}],
+      "a stopped run without result.json is listed")
+latest = report["calibration"]["latest"]
+check(set(latest) == {"A->B", "B->A"} and latest["A->B"]["sinad_db"] == 59.5 and latest["B->A"]["pc"] == "this PC",
+      "the latest calibration of each path is in the session report")
 check((out / "cross_check_report.json").is_file() and (out / "cross_check_report.csv").is_file(),
       "the session report is written as JSON and CSV")
 extracted = out / "other_pc" / "results_B"

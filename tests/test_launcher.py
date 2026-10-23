@@ -116,6 +116,11 @@ def main() -> int:
         encoding="utf-8", errors="replace", timeout=120,
     )
     check(help_result.returncode == 2 and len(help_result.stdout) > 20, "launcher returns script help")
+    for script in ("bench_calibration.py", "smoke_sequence.py"):
+        usage = subprocess.run(launcher + [script], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=120)
+        check(usage.returncode == 2 and "usage" in (usage.stdout + usage.stderr).lower(),
+              f"launcher runs {script}")
     missing_result = subprocess.run(
         launcher + ["missing_script.py"], capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=120,
@@ -237,17 +242,24 @@ def main() -> int:
             time.sleep(0.5)
         check(any("waiting_for_connection" in l for l in seq_lines), "sequence receiver is listening")
         seq_sender = subprocess.run(
-            launcher + ["smoke_sequence.py", "send", "--config", str(seq_configs["A"]), "--gap-s", "4"],
+            launcher + ["smoke_sequence.py", "send", "--config", str(seq_configs["A"]), "--gap-s", "4", "--ack-extra-s", "3"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
         )
         receiver.wait(timeout=300)
         reader.join(timeout=10)
         steps = [l for l in seq_sender.stdout.splitlines() if l.startswith("=== STEP ")]
-        check(seq_sender.returncode == 0 and len(steps) == 8, "the sender runs the 8 tests in one command")
+        check(seq_sender.returncode == 0 and len(steps) == 9, "the sender runs the 9 tests in one command")
         check([l.split()[3] for l in steps] == ["E0-1_16B", "E0-1_1KiB", "E0-1_10KiB", "E0-2_V1",
-                                                "E0-2_V2", "H1-1", "H1-2", "H1-3"], "in the MS-1.0 order")
-        check(receiver.returncode == 0 and sum("=== STEP " in l for l in seq_lines) == 8,
-              "the receiver re-arms after each test and receives all 8")
+                                                "E0-2_V2", "E0-3_ACK", "H1-1", "H1-2", "H1-3"], "in the MS-1.0 order")
+        check(receiver.returncode == 0 and sum("=== STEP " in l for l in seq_lines) == 9,
+              "the receiver re-arms after each test and receives all 9")
+        e03 = json.loads(Path(glob.glob(str(temporary / "results_SA" / "e0" / "E0-3_ACK_*" / "result.json"))[0])
+                         .read_text(encoding="utf-8"))
+        e03_rx = json.loads(Path(glob.glob(str(temporary / "results_SB" / "e0" / "E0-3_ACK_*" / "result.json"))[0])
+                            .read_text(encoding="utf-8"))
+        check(e03.get("ack_verified") is True and e03["ack_line"] == e03_rx["ack_line"]
+              and e03_rx.get("ack_sent") is True and e03_rx.get("delivered_intact") is True,
+              "E0-3: B's ACK crosses the same session and A verifies it before DISCONNECT")
         seq_reports = glob.glob(str(temporary / "results_SB" / "sequences" / "sequence_listen_*.json"))
         check(len(seq_reports) == 1 and json.loads(Path(seq_reports[0]).read_text(encoding="utf-8"))["outcome"]
               == "completed", "the receiver writes a sequence record")
@@ -257,8 +269,8 @@ def main() -> int:
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
         )
         report = json.loads(Path(pairing.stdout.split("Report saved to:")[1].strip()).read_text(encoding="utf-8"))
-        check(report["counts"] == {"passed": 8} and report["outcome"] == "passed" and not report["unpaired"],
-              "the session cross-check pairs all 8 tests of the sequence")
+        check(report["counts"] == {"passed": 9} and report["outcome"] == "passed" and not report["unpaired"],
+              "the session cross-check pairs all 9 tests of the sequence")
     finally:
         mock.kill()
     print("ALL LAUNCHER TESTS PASSED")

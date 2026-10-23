@@ -32,6 +32,7 @@ import mercury_smoke_client  # noqa: F401  # included by PyInstaller
 import mercury_status
 import smoke_cross_check  # noqa: F401  # included by PyInstaller
 import smoke_sequence  # noqa: F401  # included by PyInstaller
+import bench_calibration  # noqa: F401  # included by PyInstaller
 import vara_runtime as vara
 from smoke_common import listeners_with_pid, netstat_text, process_name
 
@@ -382,9 +383,16 @@ class ModemSmokeWindow(tk.Tk):
         role = "SENDER (PC A)" if self.values["role"].get() == "A" else "RECEIVER (PC B)"
         modem = logic.MODEMS.get(self.values["modem"].get(), "?")
         order = ""
+        if logic.is_calibration(name):
+            self.selected_label.configure(
+                text=("This PC will run: the bench calibration as " + role + ". Stop Mercury and close VARA "
+                      "on both PCs. " + ("Start PC A 5–30 s after PC B shows 'recording'. It plays first, "
+                                         "then records (path B->A)." if self.values["role"].get() == "A"
+                                         else "Start PC B first: it records (path A->B), then plays.")))
+            return
         if sequence:
             order = (" Start PC B first. PC A waits "
-                     f"{logic.SEQUENCE_GAP_S} s between tests." if self.values["role"].get() == "A"
+                     f"{logic.SEQUENCE_GAP_S} s between tests ({logic.SEQUENCE_GAP_S + 60} s after E0-3)." if self.values["role"].get() == "A"
                      else " Start PC B first; it re-arms after each test.")
         self.selected_label.configure(
             text=f"This PC will run: {logic.test_tag(name, repetition)} as {role} with {modem}. "
@@ -831,9 +839,48 @@ class ModemSmokeWindow(tk.Tk):
         self.values["mycall"].set(values["mycall"])
         self.values["peer_call"].set(values["peer_call"])
         self._save_settings()
+        if logic.is_calibration(self.test_name.get()):
+            self._run_calibration(values)
+            return
         self.run_button.configure(state="disabled")
         pid = self.mercury.pid if self.mercury.running() else None
         self._in_background(self._preflight_worker, values, pid)
+
+    def calibration_devices(self, values: dict) -> tuple[str | None, str | None]:
+        """The interface connected to the other PC: Mercury's selection, else VARA's."""
+        capture, playback = self._selected("capture"), self._selected("playback")
+        if capture and playback:
+            return capture["name"], playback["name"]
+        settings = (self.vara_info or {}).get("settings") or {}
+        return settings.get("input_device"), settings.get("output_device")
+
+    def _run_calibration(self, values: dict) -> None:
+        if self.mercury.running():
+            messagebox.showwarning("Stop Mercury first", "The calibration plays and records on the "
+                                   "interface itself. Press Stop Mercury on this PC (and close VARA).")
+            return
+        busy = runtime.busy_ports(listeners_with_pid(netstat_text(), PORTS))
+        if busy:
+            messagebox.showwarning("A modem is running", "Ports 8300/8301 are in use (PID "
+                                   + ", ".join(str(p) for pids in busy.values() for p in pids)
+                                   + "). Close VARA or Mercury, then run the calibration.")
+            return
+        input_device, output_device = self.calibration_devices(values)
+        if not input_device or not output_device:
+            messagebox.showwarning("Audio interface unknown", "Press Detect audio devices and choose the "
+                                   "interface (Mercury section), or press Check VARA, then run again.")
+            return
+        (HERE / "smoke_config.toml").write_text(logic.config_text(values), encoding="utf-8")
+        self.log.delete("1.0", "end")
+        self._append_log(f"=== Bench calibration · {'PC A' if values['role'] == 'A' else 'PC B'} · "
+                         f"input '{input_device}', output '{output_device}' ===")
+        if values["role"] == "A":
+            self._append_log("PC A: start this 5–30 s after PC B shows 'recording'.")
+        self._set_summary("Calibration running… Do not close this window.", "gray")
+        self._set_busy(True)
+        commands = logic.calibration_commands(values["role"], input_device, output_device)
+        self.worker = threading.Thread(target=self._run_commands, args=(commands, None), daemon=True)
+        self.worker.start()
 
     def _preflight_worker(self, values: dict, pid: int | None) -> None:
         verdict = self._port_verdict(values["modem"], pid)

@@ -1,7 +1,8 @@
 """Modem smoke client for profile MS-1.0 (Mercury 1.9.19 and VARA HF 4.9.0).
 
 One invocation performs one fresh sender or receiver session for E0-1, E0-2,
-or H1. The sender reports native ARQ confirmation separately from verified
+E0-3 or H1. With --ack (E0-3) B writes an ACK on the data port of the same open
+session and A verifies it before disconnecting. The sender reports native ARQ confirmation separately from verified
 delivery. The receiver validates frame length and SHA-256. Use
 smoke_cross_check.py to establish end-to-end delivery.
 
@@ -16,9 +17,9 @@ import sys
 import time
 import traceback
 
-from smoke_common import (HEADER_LEN, RunLog, TcpCapture, capture_environment,
-                          capture_final, load_config, evidence_issues, make_header, make_payload,
-                          mono_ns, parse_header, sha256_bytes, tnc_config)
+from smoke_common import (HEADER_LEN, RunLog, TcpCapture, ack_run, capture_environment,
+                          capture_final, load_config, evidence_issues, make_ack, make_header,
+                          make_payload, mono_ns, parse_ack, parse_header, sha256_bytes, tnc_config)
 
 RX_CONNECTED = r"^\s*CONNECTED\b"
 RX_DISCONNECTED = r"^\s*DISCONNECTED\b"
@@ -202,7 +203,8 @@ def base_result(args, cfg, rlog, m) -> dict:
             "app_version": cfg["general"].get("app_version"),
             "modem": modem, "arm": arm,
             "mycall": m["mycall"], "peer_call": m["peer_call"], "bw_command": m["bw_command"],
-            "bw_when": args.bw_when, "payload_bytes_requested": args.payload_size}
+            "bw_when": args.bw_when, "payload_bytes_requested": args.payload_size,
+            "ack_mode": bool(getattr(args, "ack", False))}
 
 
 def run_session_commands(cmd, profile, win, responses, failures, warnings) -> None:
@@ -230,6 +232,31 @@ def finish(res, cmd, m, responses, failures, warnings, idx_start) -> None:
         failures.append("a command response matches error_patterns")
     res["protocol_warnings"] = warnings
     res["failures"] = failures
+
+
+def wait_for_ack(res: dict, data: TcpCapture, header: bytes, payload_sha: str,
+                 t_write_ns: int, timeout_s: float, failures: list[str]) -> None:
+    """E0-3 sender: read B's ACK from the open session and check that it names this frame."""
+    res.update({"ack_verified": False, "ack_line": None,
+                "ack_expected": {"run": ack_run(header), "sha256_16": payload_sha[:16]}})
+    try:
+        line = data.read_until(b"\n", timeout_s)
+    except (TimeoutError, ConnectionError, ValueError) as e:
+        failures.append(f"E0-3: no ACK from B in the open session ({e})")
+        return
+    t_ack = mono_ns()
+    res["ack_line"] = line.decode("ascii", "replace").strip()
+    res["ack_round_trip_s"] = seconds_between(t_write_ns, t_ack)
+    ack = parse_ack(line)
+    if ack is None:
+        failures.append(f"E0-3: B's reply is not an ACK: {res['ack_line']!r}")
+    elif ack != res["ack_expected"]:
+        failures.append(f"E0-3: the ACK names another frame: {ack} (expected {res['ack_expected']})")
+    else:
+        res["ack_verified"] = True
+    extra = data.pending()
+    if extra:
+        failures.append(f"E0-3: {extra} unexpected bytes after the ACK on the data port")
 
 
 def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
@@ -301,6 +328,9 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                 else:
                     res["arq_confirmed"] = True
                     res["t_transferencia_s"] = seconds_between(t_w0, b0[1][0])
+                if args.ack:
+                    wait_for_ack(res, data, header, res["payload_sha256"], t_w0,
+                                 m.get("ack_timeout_s", 300), failures)
                 # The session is active, so DISCONNECT must be accepted.
                 responses["disconnect"] = send_command(cmd, "DISCONNECT", win)
                 judge_command(responses["disconnect"], "DISCONNECT", failures, warnings, req)
@@ -311,7 +341,29 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
         failures.append("DISCONNECTED was not confirmed")
     finish(res, cmd, m, responses, failures, warnings, idx_start)
     res["sender_completed"] = not failures
+    if args.ack:
+        res["sender_completed"] = res["sender_completed"] and res.get("ack_verified") is True
     return res
+
+
+def send_ack(res: dict, cmd: TcpCapture, data: TcpCapture, header: bytes, sha: str,
+             m: dict, failures: list[str]) -> None:
+    """E0-3 receiver: write the ACK in the same session and record its ARQ confirmation."""
+    ack = make_ack(header, sha)
+    idx = cmd.nlines()
+    t0 = mono_ns()
+    try:
+        data.send(ack, label="ack")
+    except OSError as e:
+        failures.append(f"E0-3: the ACK could not be written: {e!r}")
+        res["ack_sent"] = False
+        return
+    res["ack_sent"] = True
+    res["ack_line"] = ack.decode("ascii").strip()
+    # Recorded, not judged: the sender's verification is the pass criterion.
+    b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", m.get("ack_timeout_s", 300), start=idx, t_min_ns=t0)
+    res["ack_arq_confirmed"] = b0 is not None
+    res["ack_arq_s"] = seconds_between(t0, b0[1][0]) if b0 else None
 
 
 def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
@@ -372,12 +424,15 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                         failures.append("SHA-256 does not match the header")
                     if not res["matches_expected_payload"]:
                         failures.append("payload does not match the seeded payload")
+                    if args.ack and not failures:
+                        send_ack(res, cmd, data, cab, sha, m, failures)
                 except (TimeoutError, ConnectionError, ValueError) as e:
                     failures.append(f"data port read failed: {e!r}")
 
                 # Extra bytes: wait a grace period, then count everything received.
                 time.sleep(m["extra_bytes_grace_s"])
-                d = cmd.wait_line(RX_DISCONNECTED, m["disconnect_wait_s"], start=idx0)
+                d = cmd.wait_line(RX_DISCONNECTED, m["disconnect_wait_s"]
+                                  + (m.get("ack_timeout_s", 300) if args.ack else 0), start=idx0)
                 if d:
                     t_disc = d[1][0]
     res["final_state"], res["cleanup_disconnect"] = ensure_disconnected(
@@ -433,6 +488,8 @@ def main() -> int:
     ap.add_argument("--phase", choices=["e0", "smoke"], default="e0")
     ap.add_argument("--tag", required=True, help="For example: E0-1_1KB, E0-2_V1, H1-1")
     ap.add_argument("--payload-size", type=int, default=200)
+    ap.add_argument("--ack", action="store_true",
+                    help="E0-3: B writes an ACK in the same session; A verifies it before DISCONNECT")
     ap.add_argument("--bw-when", choices=["before", "after", "none"], default="before",
                     help="before: BW before CONNECT/LISTEN ON; after: after CONNECTED; "
                          "none: do not send BW")
