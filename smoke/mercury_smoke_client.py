@@ -135,6 +135,20 @@ def connected_failures(info: dict) -> list[str]:
     return failures
 
 
+def early_session(chunks, listen_ns: int | None, lines_ns, t_conn: int | None) -> dict | None:
+    """Detect a session that began before this receiver listened.
+
+    Evidence: bytes on the data port before LISTEN ON was sent, or a DISCONNECTED
+    before the CONNECTED this run waited for (2026-10-22, Mercury H1-1 at 23:44).
+    """
+    early_bytes = sum(n for t, n in chunks if listen_ns is not None and t < listen_ns)
+    early_disconnect = any(re.match(RX_DISCONNECTED, txt) for t, txt in lines_ns
+                           if t_conn is None or t < t_conn)
+    if not (early_bytes or early_disconnect):
+        return None
+    return {"bytes_before_listen_on": early_bytes, "disconnected_before_connected": early_disconnect}
+
+
 def ensure_disconnected(cmd: TcpCapture, espera_s: float, desde: int, win: float):
     """Confirm the final DISCONNECTED event, sending cleanup if required."""
     visto = cmd.wait_line(RX_DISCONNECTED, 0.1, start=desde)
@@ -368,6 +382,14 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                     t_disc = d[1][0]
     res["final_state"], res["cleanup_disconnect"] = ensure_disconnected(
         cmd, m["disconnect_wait_s"], idx0, win)
+    if "listen" in responses:
+        # Mercury 1.9.19 stays LISTENING after the TCP client leaves (listen_enabled is
+        # kept) and buffers what a caller sends until the next client connects. Release
+        # it, so that a sender started too early fails cleanly instead of delivering
+        # into the next run.
+        responses["listen_off"] = send_command(cmd, "LISTEN OFF", win)
+        if responses["listen_off"]["response"] != "OK":
+            warnings.append(f"LISTEN OFF: no OK ({responses['listen_off']['lines']})")
 
     esperado_total = HEADER_LEN + res.get("declared_length", 0)
     total = sum(n for _, n in data.chunks)
@@ -383,6 +405,18 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     if fuera:
         failures.append(f"{fuera} bytes on the data port outside the CONNECTED session")
     res["data_port_chunks"] = [{"t_mono_ns": t, "bytes": n} for t, n in data.chunks]
+    # A session that began before this PC listened (the sender started first, or the
+    # modem was still listening from an earlier run). Not a modem failure.
+    with cmd.cond:
+        lines_ns = list(cmd.lines[idx_start:])
+    early = early_session(data.chunks, cmd.tx_times.get("LISTEN ON"), lines_ns, t_conn)
+    if early:
+        res["procedure_fault"] = True
+        res["procedure_fault_detail"] = early
+        failures.insert(0, "PROCEDURE: the modem already had a session before this PC was "
+                           "listening (PC A started before PC B showed waiting_for_connection, "
+                           "or the modem was still listening from an earlier run). Not a modem "
+                           "failure; repeat this test, PC B first")
 
     if res["final_state"] != "disconnected":
         failures.append("DISCONNECTED was not confirmed")

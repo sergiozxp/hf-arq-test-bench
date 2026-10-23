@@ -286,6 +286,9 @@ def summarize(result: dict) -> tuple[str, str]:
         if outcome == "invalid_pair":
             return (prefix + "NOT THE SAME TEST: " + "; ".join(result.get("pair_mismatches") or [])
                     + ". This pair is not counted.", "red")
+        if outcome == "procedure_fault":
+            return (prefix + "PROCEDURE FAULT: the sender started before the receiver was listening. "
+                    "Not counted; repeat this test, PC B first.", "orange")
         if outcome == "infrastructure_fault":
             return prefix + "INFRASTRUCTURE FAULT (for example MISSING SOUNDCARD): not counted.", "orange"
         return prefix + "CROSS-CHECK FAILED: " + "; ".join(result.get("warnings") or []), "red"

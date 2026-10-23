@@ -14,7 +14,7 @@ Status legend: **confirmed** = observed with the real modem and archived evidenc
 | Version | `mercury.exe -V` (confirmed) | `VERSION` → `VERSION VARA HF v4.9.0`, no `OK` (confirmed) | Recorded in every run |
 | Session timing | none | `P2P SESSION` → `OK`, `CHAT OFF` → `OK` (confirmed) | Sent once per run on VARA (protocol v5.1) |
 | Configure bandwidth | `BW500` / `BW2300` → `OK`, also accepted with an open session (confirmed) | `BW500` → `OK` before the session (confirmed); during an open session → `WRONG` and the session continues at its bandwidth (confirmed, E0-2 V2) | Save requested and confirmed value |
-| Listen | `LISTEN ON` → `OK` (confirmed) | `LISTEN ON` → `OK` (confirmed). Never sent during a session: VARA disconnects (documented, 4.5.9) | Receiver ready before sender |
+| Listen | `LISTEN ON` → `OK` (confirmed). Stays listening after the TCP client disconnects, and buffers what a caller sends until the next client connects (source, confirmed 2026-10-22 H1-1); the receiver sends `LISTEN OFF` at the end of every run from 0.2.0-alpha.3 | `LISTEN ON` → `OK` (confirmed). Never sent during a session: VARA disconnects (documented, 4.5.9) | Receiver ready before sender |
 | Connect | `CONNECT <source> <destination>` → `OK` (confirmed) | `CONNECT <source> <destination>` → `OK`; the receiver reports `PENDING` first (confirmed) | Fresh session per attempt |
 | Detect connection | `CONNECTED <source> <destination> 500` (confirmed: 4 fields, bandwidth as a number) | `CONNECTED XQ2CG-1 XQ2CG-2 500` (confirmed, same form) | Archive raw event; bandwidth must match |
 | Send/receive bytes | Data port 8301 while connected (confirmed: 16 B, 1 KiB, 10 KiB intact) | Data port 8301 (confirmed: 16 B, 1 KiB, 10 KiB intact) | Same frame and ACK grammar |

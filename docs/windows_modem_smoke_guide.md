@@ -155,6 +155,11 @@ running between tests.
 
 - Do not repeat a failed test blindly. Keep both result archives and review them.
 - "Ports … belong to VARA / mercury.exe": the other modem is running. Close it.
+- "PROCEDURE": PC A started before PC B was listening, so the modem on PC B took
+  the call with no test running and handed the buffered bytes to the next test.
+  It is not counted as a modem failure. Repeat that test, PC B first. From
+  0.2.0-alpha.3 PC B sends `LISTEN OFF` after every test, so a sender that starts
+  too early now fails with "no CONNECTED" instead.
 - "INFRASTRUCTURE FAULT": the modem reported a sound card failure (VARA:
   `MISSING SOUNDCARD`). The attempt is not counted as a modem failure.
 - If VARA is opened while Mercury still owns ports 8300/8301, VARA cannot take them.

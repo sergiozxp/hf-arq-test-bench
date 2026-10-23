@@ -124,6 +124,8 @@ def cross_check(em: dict, rx: dict) -> dict:
         result["outcome"] = "invalid_pair"
     elif em.get("infrastructure_fault") or rx.get("infrastructure_fault"):
         result["outcome"] = "infrastructure_fault"
+    elif em.get("procedure_fault") or rx.get("procedure_fault"):
+        result["outcome"] = "procedure_fault"
     elif not delivered:
         result["outcome"] = "failed"
     else:

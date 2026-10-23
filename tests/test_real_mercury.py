@@ -89,6 +89,24 @@ def main() -> int:
         check(isinstance(monitor.latest.get("audio_ok"), bool)
               and isinstance(monitor.latest.get("tx_peak_dbfs"), (int, float)),
               "status carries the meter fields (audio_ok, tx_peak_dbfs)")
+
+        # LISTEN OFF is accepted (the receiver releases listening after every run).
+        import socket
+        with socket.create_connection(("127.0.0.1", 8300), timeout=10) as control:
+            replies = b""
+            for command in (b"MYCALL XQ2CG-2", b"LISTEN ON", b"LISTEN OFF"):
+                control.sendall(command + b"\r")
+                end = time.monotonic() + 3
+                while time.monotonic() < end and replies.count(b"OK\r") + replies.count(b"WRONG\r") < \
+                        (1 + [b"MYCALL XQ2CG-2", b"LISTEN ON", b"LISTEN OFF"].index(command)):
+                    control.settimeout(max(0.1, end - time.monotonic()))
+                    try:
+                        replies += control.recv(4096)
+                    except socket.timeout:
+                        break
+            print("control replies:", replies)
+            check(replies.count(b"OK\r") >= 3 and b"WRONG" not in replies,
+                  "Mercury answers OK to MYCALL, LISTEN ON and LISTEN OFF")
     finally:
         if monitor:
             monitor.stop()

@@ -330,6 +330,7 @@ class TcpCapture:
         self._idx = open(rlog.dir / f"raw_rx_{name}.idx.jsonl", "w", encoding="utf-8")
         self._txidx = open(rlog.dir / f"raw_tx_{name}.idx.jsonl", "w", encoding="utf-8")
         self._tx_off = 0
+        self.tx_times: dict[str, int] = {}   # label -> monotonic time of its first send
         self.sock = socket.create_connection((host, port), timeout=10)
         self.sock.settimeout(0.5)
         self._stop = threading.Event()
@@ -379,6 +380,8 @@ class TcpCapture:
     # --- send
     def send(self, data: bytes, label: str = "") -> None:
         t0, u0 = mono_ns(), utc_iso()
+        if label:
+            self.tx_times.setdefault(label, t0)
         self.sock.sendall(data)
         t1 = mono_ns()
         self._tx.write(data)
