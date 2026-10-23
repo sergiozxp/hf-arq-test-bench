@@ -45,6 +45,41 @@ mercury_log = ""
 """
 
 
+# The same two endpoints driven as VARA HF (alpha.3 configuration layout).
+CONFIG_VARA = """[general]
+results_dir = '{results}'
+payload_seed = 20261021
+max_payload_bytes = 1048576
+protocol_version = "5.0"
+smoke_profile = "MS-1.0"
+app_version = "test"
+[modem]
+name = "vara"
+arm = "VARA HF unlicensed"
+[tnc]
+host = "127.0.0.1"
+cmd_port = {command_port}
+data_port = {data_port}
+mycall = "CALL-{local}"
+peer_call = "CALL-{peer}"
+bw_command = "BW500"
+cmd_response_window_s = 0.3
+connect_timeout_s = 90
+listen_timeout_s = 180
+transfer_timeout_s = 60
+idle_timeout_s = 30
+extra_bytes_grace_s = 1
+disconnect_wait_s = 30
+session_tolerance_ms = 50
+error_patterns = []
+[binaries]
+vara_exe = ""
+[evidence]
+vara_ini = '{vara_ini}'
+"""
+SECRET = "SECRET-REGISTRATION-CODE"
+
+
 def check(condition: bool, message: str) -> None:
     print(("OK   " if condition else "FAIL ") + message, flush=True)
     if not condition:
@@ -131,6 +166,99 @@ def main() -> int:
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
         )
         check(json.loads(cross_check.stdout)["outcome"] == "passed", "cross-check passes")
+
+        # Second session: VARA HF profile, with a VARA.ini that holds a registration code.
+        vara_ini = temporary / "VARA.ini"
+        vara_ini.write_bytes(f"[Setup]\r\nRegistration Code={SECRET}\r\nTCP Command Port=8300\r\n".encode())
+        vara_configs = {}
+        for local, peer, command_port, data_port in (("A", "B", 18300, 18301), ("B", "A", 19300, 19301)):
+            path = temporary / f"config_vara_{local}.toml"
+            path.write_text(CONFIG_VARA.format(results=temporary / f"results_{local}", command_port=command_port,
+                                               data_port=data_port, local=local, peer=peer,
+                                               vara_ini=vara_ini), encoding="utf-8")
+            vara_configs[local] = path
+        receiver = subprocess.Popen(
+            launcher + ["mercury_smoke_client.py", "listen", "--config", str(vara_configs["B"]),
+                        "--tag", "VARA_TEST", "--payload-size", "200"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+        )
+        vara_lines: list[str] = []
+        reader = threading.Thread(target=lambda: [vara_lines.append(l) for l in receiver.stdout], daemon=True)
+        reader.start()
+        deadline = time.time() + 150
+        while time.time() < deadline and not any("waiting_for_connection" in l for l in vara_lines):
+            time.sleep(0.5)
+        check(any("waiting_for_connection" in l for l in vara_lines), "VARA receiver is listening")
+        subprocess.run(
+            launcher + ["mercury_smoke_client.py", "send", "--config", str(vara_configs["A"]),
+                        "--tag", "VARA_TEST", "--payload-size", "200"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+        )
+        receiver.wait(timeout=180)
+        reader.join(timeout=10)
+        vara_rx = json.loads(Path(glob.glob(str(temporary / "results_B" / "e0" / "VARA_TEST_*" / "result.json"))[0])
+                             .read_text(encoding="utf-8"))
+        check(vara_rx.get("delivered_intact") is True and vara_rx.get("modem") == "vara"
+              and vara_rx.get("arm") == "VARA HF unlicensed", "VARA receiver verifies the payload")
+        check(all(f"session:{c}" in vara_rx["responses"] for c in ("VERSION", "P2P SESSION", "CHAT OFF")),
+              "VARA session commands are sent and recorded")
+        for path in (temporary / "results_A").rglob("*"):
+            if path.is_file() and SECRET.encode() in path.read_bytes():
+                check(False, f"registration code leaked into {path}")
+        check(True, "no registration code in any result file")
+
+        pairing = subprocess.run(
+            launcher + ["smoke_cross_check.py", "--pair", str(temporary / "results_A"), str(temporary / "results_B")],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        check("Report saved to:" in pairing.stdout, "session cross-check writes a report")
+        report_path = pairing.stdout.split("Report saved to:")[1].strip()
+        report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+        check(report["counts"] == {"passed": 2} and report["outcome"] == "passed",
+              "session cross-check pairs the Mercury and the VARA test")
+
+        # Third session: the full MS-1.0 sequence, one command per PC (B first, then A).
+        seq_configs = {}
+        for local, peer, command_port, data_port in (("A", "B", 18300, 18301), ("B", "A", 19300, 19301)):
+            (temporary / f"results_S{local}").mkdir()
+            path = temporary / f"config_seq_{local}.toml"
+            path.write_text(CONFIG.format(results=temporary / f"results_S{local}", command_port=command_port,
+                                          data_port=data_port, local=local, peer=peer), encoding="utf-8")
+            seq_configs[local] = path
+        receiver = subprocess.Popen(
+            launcher + ["smoke_sequence.py", "listen", "--config", str(seq_configs["B"])],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+        )
+        seq_lines: list[str] = []
+        reader = threading.Thread(target=lambda: [seq_lines.append(l) for l in receiver.stdout], daemon=True)
+        reader.start()
+        deadline = time.time() + 150
+        while time.time() < deadline and not any("waiting_for_connection" in l for l in seq_lines):
+            time.sleep(0.5)
+        check(any("waiting_for_connection" in l for l in seq_lines), "sequence receiver is listening")
+        seq_sender = subprocess.run(
+            launcher + ["smoke_sequence.py", "send", "--config", str(seq_configs["A"]), "--gap-s", "4"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+        )
+        receiver.wait(timeout=300)
+        reader.join(timeout=10)
+        steps = [l for l in seq_sender.stdout.splitlines() if l.startswith("=== STEP ")]
+        check(seq_sender.returncode == 0 and len(steps) == 8, "the sender runs the 8 tests in one command")
+        check([l.split()[3] for l in steps] == ["E0-1_16B", "E0-1_1KiB", "E0-1_10KiB", "E0-2_V1",
+                                                "E0-2_V2", "H1-1", "H1-2", "H1-3"], "in the MS-1.0 order")
+        check(receiver.returncode == 0 and sum("=== STEP " in l for l in seq_lines) == 8,
+              "the receiver re-arms after each test and receives all 8")
+        seq_reports = glob.glob(str(temporary / "results_SB" / "sequences" / "sequence_listen_*.json"))
+        check(len(seq_reports) == 1 and json.loads(Path(seq_reports[0]).read_text(encoding="utf-8"))["outcome"]
+              == "completed", "the receiver writes a sequence record")
+        pairing = subprocess.run(
+            launcher + ["smoke_cross_check.py", "--pair", str(temporary / "results_SA"),
+                        str(temporary / "results_SB")],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        report = json.loads(Path(pairing.stdout.split("Report saved to:")[1].strip()).read_text(encoding="utf-8"))
+        check(report["counts"] == {"passed": 8} and report["outcome"] == "passed" and not report["unpaired"],
+              "the session cross-check pairs all 8 tests of the sequence")
     finally:
         mock.kill()
     print("ALL LAUNCHER TESTS PASSED")

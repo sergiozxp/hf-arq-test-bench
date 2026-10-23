@@ -1,9 +1,12 @@
-"""Mercury 1.9.19 client for Modem Smoke Profile MS-1.0.
+"""Modem smoke client for profile MS-1.0 (Mercury 1.9.19 and VARA HF 4.9.0).
 
 One invocation performs one fresh sender or receiver session for E0-1, E0-2,
 or H1. The sender reports native ARQ confirmation separately from verified
 delivery. The receiver validates frame length and SHA-256. Use
 smoke_cross_check.py to establish end-to-end delivery.
+
+The file keeps its historical name (it is referenced by the packaged GUI); the
+modem is selected by [modem] name in the configuration.
 """
 from __future__ import annotations
 
@@ -15,12 +18,38 @@ import traceback
 
 from smoke_common import (HEADER_LEN, RunLog, TcpCapture, capture_environment,
                           capture_final, load_config, evidence_issues, make_header, make_payload,
-                          mono_ns, parse_header, sha256_bytes)
+                          mono_ns, parse_header, sha256_bytes, tnc_config)
 
 RX_CONNECTED = r"^\s*CONNECTED\b"
 RX_DISCONNECTED = r"^\s*DISCONNECTED\b"
 RX_BUFFER = r"^\s*BUFFER\s+(\d+)"
 RX_RESP = r"^\s*(OK|WRONG)\b"
+RX_SN = r"^\s*SN\s+(-?\d+(?:\.\d+)?)"
+# "BITRATE (3) 321 BPS" (Mercury) and "BITRATE (4)  88 bps TX" (VARA 4.9.0): level in brackets.
+RX_BITRATE = r"^\s*BITRATE\s+\((\d+)\)\s+(\d+)\s*bps(?:\s+(TX|RX))?"
+INFRASTRUCTURE_EVENTS = ("MISSING SOUNDCARD",)
+
+# Per-modem differences, kept here so that the procedure itself stays common.
+#   require_ok:       a command without an OK/WRONG reply is a failure (True) or only
+#                     a protocol warning (False, until the replies are confirmed in E0-2).
+#   session_commands: sent once after MYCALL, before BW/CONNECT/LISTEN ON.
+MODEM_PROFILES = {
+    "mercury": {
+        "label": "Mercury 1.9.19",
+        "require_ok": True,
+        "session_commands": [],
+    },
+    "vara": {
+        "label": "VARA HF 4.9.0",
+        # Confirmed on 2026-10-22 (E0-1, both PCs): VARA answers OK to MYCALL, P2P SESSION,
+        # CHAT OFF, BW500, LISTEN ON, CONNECT and DISCONNECT, like Mercury.
+        "require_ok": True,
+        # VERSION (VARA >= 4.6.4) records the running version; P2P SESSION (>= 4.5.7)
+        # selects the 4.6 s retry cycle documented for peer-to-peer links; CHAT OFF
+        # (the default) keeps the timing optimised for data transfer, not chat.
+        "session_commands": ["VERSION", "P2P SESSION", "CHAT OFF"],
+    },
+}
 
 
 def seconds_between(a: int | None, b: int | None):
@@ -57,21 +86,29 @@ def send_command(cmd: TcpCapture, text: str, window_s: float) -> dict:
     return {"command": text, "response": response, "lines": lines}
 
 
-def judge_command(result: dict, label: str, failures: list[str]) -> bool:
-    """Record a failure unless the command response is OK."""
+def judge_command(result: dict, label: str, failures: list[str],
+                  warnings: list[str] | None = None, require_ok: bool = True) -> bool:
+    """Record a failure for WRONG, and for a missing reply when require_ok is set.
+
+    Returns True when the procedure may continue.
+    """
     if result["response"] == "OK":
         return True
     if result["response"] == "WRONG":
-        failures.append(f"{label}: Mercury returned WRONG ({result['command']})")
-    else:
-        failures.append(f"{label}: no recognized OK/WRONG response ({result['command']}); "
-                        f"lines: {result['lines']}")
-    return False
+        failures.append(f"{label}: the modem returned WRONG ({result['command']})")
+        return False
+    message = (f"{label}: no recognized OK/WRONG response ({result['command']}); "
+               f"lines: {result['lines']}")
+    if require_ok or warnings is None:
+        failures.append(message)
+        return False
+    warnings.append(message)
+    return True
 
 
 def parse_connected(text: str, bandwidth_command: str, mycall: str, peer_call: str,
                     role: str) -> dict:
-    """Parse and validate a Mercury CONNECTED event."""
+    """Parse and validate a CONNECTED event (same form on Mercury and VARA)."""
     fields = text.split()
     expected_bandwidth = digits_only(bandwidth_command)
     info = {"line": text, "fields": fields, "expected_bandwidth": expected_bandwidth,
@@ -98,6 +135,20 @@ def connected_failures(info: dict) -> list[str]:
     return failures
 
 
+def early_session(chunks, listen_ns: int | None, lines_ns, t_conn: int | None) -> dict | None:
+    """Detect a session that began before this receiver listened.
+
+    Evidence: bytes on the data port before LISTEN ON was sent, or a DISCONNECTED
+    before the CONNECTED this run waited for (2026-10-22, Mercury H1-1 at 23:44).
+    """
+    early_bytes = sum(n for t, n in chunks if listen_ns is not None and t < listen_ns)
+    early_disconnect = any(re.match(RX_DISCONNECTED, txt) for t, txt in lines_ns
+                           if t_conn is None or t < t_conn)
+    if not (early_bytes or early_disconnect):
+        return None
+    return {"bytes_before_listen_on": early_bytes, "disconnected_before_connected": early_disconnect}
+
+
 def ensure_disconnected(cmd: TcpCapture, espera_s: float, desde: int, win: float):
     """Confirm the final DISCONNECTED event, sending cleanup if required."""
     visto = cmd.wait_line(RX_DISCONNECTED, 0.1, start=desde)
@@ -108,30 +159,105 @@ def ensure_disconnected(cmd: TcpCapture, espera_s: float, desde: int, win: float
     return ("disconnected" if visto else "not_confirmed"), limpieza
 
 
+def link_stats(lines: list[str]) -> dict:
+    """Summarise link observations reported on the command port (SN, BITRATE, PTT)."""
+    sn = [float(m.group(1)) for line in lines for m in [re.match(RX_SN, line)] if m]
+    bitrates = list(dict.fromkeys(line.strip() for line in lines
+                                  if line.strip().upper().startswith("BITRATE")))
+    levels = [{"level": int(m.group(1)), "bps": int(m.group(2)), "direction": m.group(3)}
+              for line in lines for m in [re.match(RX_BITRATE, line, re.I)] if m]
+    upper = [line.strip().upper() for line in lines]
+    # VARA reports whether the link runs in registered (licensed) mode.
+    link_state = ("unregistered" if "LINK UNREGISTERED" in upper
+                  else "registered" if "LINK REGISTERED" in upper else None)
+    return {
+        "sn_db": sn,
+        "sn_min_db": min(sn) if sn else None,
+        "sn_max_db": max(sn) if sn else None,
+        "bitrate_lines": bitrates,
+        "bitrate_levels": levels,
+        "first_level": levels[0]["level"] if levels else None,
+        "link_state": link_state,
+        "busy_on_count": upper.count("BUSY ON"),
+        "ptt_on_count": sum(1 for line in lines if line.strip().upper() == "PTT ON"),
+        "infrastructure_events": [line for line in lines
+                                  if any(e in line.upper() for e in INFRASTRUCTURE_EVENTS)],
+    }
+
+
+def modem_identity(cfg: dict) -> tuple[str, dict, str]:
+    modem = cfg.get("modem", {}).get("name", "mercury")
+    if modem not in MODEM_PROFILES:
+        raise ValueError(f"unknown modem '{modem}' in [modem] name")
+    profile = MODEM_PROFILES[modem]
+    arm = cfg.get("modem", {}).get("arm", profile["label"])
+    return modem, profile, arm
+
+
+def base_result(args, cfg, rlog, m) -> dict:
+    modem, _profile, arm = modem_identity(cfg)
+    return {"mode": args.mode, "tag": args.tag, "run_id": rlog.run_id,
+            "protocol_version": cfg["general"].get("protocol_version", "5.0"),
+            "smoke_profile": cfg["general"].get("smoke_profile", "MS-1.0"),
+            "app_version": cfg["general"].get("app_version"),
+            "modem": modem, "arm": arm,
+            "mycall": m["mycall"], "peer_call": m["peer_call"], "bw_command": m["bw_command"],
+            "bw_when": args.bw_when, "payload_bytes_requested": args.payload_size}
+
+
+def run_session_commands(cmd, profile, win, responses, failures, warnings) -> None:
+    for text in profile["session_commands"]:
+        key = "session:" + text
+        responses[key] = send_command(cmd, text, win)
+        if text == "VERSION":
+            continue  # its reply is the version text; recorded, not judged
+        judge_command(responses[key], text, failures, warnings, profile["require_ok"])
+
+
+def finish(res, cmd, m, responses, failures, warnings, idx_start) -> None:
+    """Common bookkeeping at the end of a sender or receiver session."""
+    with cmd.cond:
+        session_lines = [line[1] for line in cmd.lines[idx_start:]]
+    res["link_stats"] = stats = link_stats(session_lines)
+    if stats["infrastructure_events"]:
+        res["infrastructure_fault"] = True
+        failures.append("infrastructure fault reported by the modem: "
+                        + "; ".join(stats["infrastructure_events"]))
+    res["responses"] = responses
+    res["command_response_error"] = has_error(
+        [l for v in responses.values() for l in v["lines"]], m.get("error_patterns", []))
+    if res["command_response_error"]:
+        failures.append("a command response matches error_patterns")
+    res["protocol_warnings"] = warnings
+    res["failures"] = failures
+
+
 def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
-    m = cfg["mercury"]
+    m = tnc_config(cfg)
+    _modem, profile, _arm = modem_identity(cfg)
+    req = profile["require_ok"]
     win = m["cmd_response_window_s"]
     seed = cfg["general"]["payload_seed"]
     payload = make_payload(args.payload_size, seed)
     header = make_header(payload)
-    res = {"mode": "send", "tag": args.tag, "run_id": rlog.run_id,
-           "protocol_version": cfg["general"].get("protocol_version", "5.0"),
-           "smoke_profile": cfg["general"].get("smoke_profile", "MS-1.0"),
-           "mycall": m["mycall"], "destination": m["peer_call"], "bw_command": m["bw_command"],
-           "bw_when": args.bw_when, "payload_bytes": len(payload),
-           "payload_sha256": sha256_bytes(payload), "header_hex": header.hex(),
-           "arq_confirmed": False, "delivered_intact": None}
+    res = base_result(args, cfg, rlog, m)
+    res.update({"destination": m["peer_call"], "payload_bytes": len(payload),
+                "payload_sha256": sha256_bytes(payload), "header_hex": header.hex(),
+                "arq_confirmed": False, "delivered_intact": None})
     failures: list[str] = []
+    warnings: list[str] = []
     responses: dict[str, dict] = {}
+    idx_start = cmd.nlines()
 
     def enviar_bw():
         responses["bw"] = send_command(cmd, m["bw_command"], win)
         res["bw_accepted"] = responses["bw"]["response"] == "OK"
-        if args.bw_when == "before" and not res["bw_accepted"]:
-            judge_command(responses["bw"], "BW antes de CONNECT", failures)
+        if args.bw_when == "before" and responses["bw"]["response"] != "OK":
+            judge_command(responses["bw"], "BW before CONNECT", failures, warnings, req)
 
     responses["mycall"] = send_command(cmd, f"MYCALL {m['mycall']}", win)
-    judge_command(responses["mycall"], "MYCALL", failures)
+    judge_command(responses["mycall"], "MYCALL", failures, warnings, req)
+    run_session_commands(cmd, profile, win, responses, failures, warnings)
     if args.bw_when == "before":
         enviar_bw()
 
@@ -140,14 +266,14 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     t_conn = None
     if not failures:
         responses["connect"] = send_command(cmd, f"CONNECT {m['mycall']} {m['peer_call']}", win)
-        if judge_command(responses["connect"], "CONNECT", failures):
+        if judge_command(responses["connect"], "CONNECT", failures, warnings, req):
             r = cmd.wait_line(RX_CONNECTED, m["connect_timeout_s"], start=idx0)
             if r is None:
                 failures.append("no CONNECTED event was observed")
             else:
                 t_conn = r[1][0]
                 res["connected"] = parse_connected(r[1][1], m["bw_command"], m["mycall"],
-                                                      m["peer_call"], "send")
+                                                   m["peer_call"], "send")
                 failures += connected_failures(res["connected"])
                 if args.bw_when == "after":
                     enviar_bw()
@@ -155,9 +281,9 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                 idx_w = cmd.nlines()
                 t_w0 = mono_ns()
                 try:
-                    data.send(header + payload, label="cabecera+payload")
+                    data.send(header + payload, label="header+payload")
                 except OSError as e:
-                    failures.append(f"error while writing port 8301: {e!r}")
+                    failures.append(f"error while writing the data port: {e!r}")
                 t_w1 = mono_ns()
                 res["write_s"] = seconds_between(t_w0, t_w1)
                 b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", m["transfer_timeout_s"],
@@ -177,49 +303,46 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                     res["t_transferencia_s"] = seconds_between(t_w0, b0[1][0])
                 # The session is active, so DISCONNECT must be accepted.
                 responses["disconnect"] = send_command(cmd, "DISCONNECT", win)
-                judge_command(responses["disconnect"], "DISCONNECT", failures)
+                judge_command(responses["disconnect"], "DISCONNECT", failures, warnings, req)
     res["connection_s"] = seconds_between(t_cmd, t_conn)
     res["final_state"], res["cleanup_disconnect"] = ensure_disconnected(
         cmd, m["disconnect_wait_s"], idx0, win)
     if res["final_state"] != "disconnected":
         failures.append("DISCONNECTED was not confirmed")
-    res["responses"] = responses
-    res["command_response_error"] = has_error(
-        [l for v in responses.values() for l in v["lines"]], m.get("error_patterns", []))
-    if res["command_response_error"]:
-        failures.append("a command response matches error_patterns")
-    res["failures"] = failures
+    finish(res, cmd, m, responses, failures, warnings, idx_start)
     res["sender_completed"] = not failures
     return res
 
 
 def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
-    m = cfg["mercury"]
+    m = tnc_config(cfg)
+    _modem, profile, _arm = modem_identity(cfg)
+    req = profile["require_ok"]
     win = m["cmd_response_window_s"]
     seed = cfg["general"]["payload_seed"]
-    res = {"mode": "listen", "tag": args.tag, "run_id": rlog.run_id,
-           "protocol_version": cfg["general"].get("protocol_version", "5.0"),
-           "smoke_profile": cfg["general"].get("smoke_profile", "MS-1.0"),
-           "mycall": m["mycall"], "bw_command": m["bw_command"], "bw_when": args.bw_when,
-           "delivered_intact": False, "arq_confirmed": None}
+    res = base_result(args, cfg, rlog, m)
+    res.update({"delivered_intact": False, "arq_confirmed": None})
     failures: list[str] = []
+    warnings: list[str] = []
     responses: dict[str, dict] = {}
+    idx_start = cmd.nlines()
 
     def enviar_bw():
         responses["bw"] = send_command(cmd, m["bw_command"], win)
         res["bw_accepted"] = responses["bw"]["response"] == "OK"
-        if args.bw_when == "before" and not res["bw_accepted"]:
-            judge_command(responses["bw"], "BW antes de LISTEN ON", failures)
+        if args.bw_when == "before" and responses["bw"]["response"] != "OK":
+            judge_command(responses["bw"], "BW before LISTEN ON", failures, warnings, req)
 
     responses["mycall"] = send_command(cmd, f"MYCALL {m['mycall']}", win)
-    judge_command(responses["mycall"], "MYCALL", failures)
+    judge_command(responses["mycall"], "MYCALL", failures, warnings, req)
+    run_session_commands(cmd, profile, win, responses, failures, warnings)
     if args.bw_when == "before":
         enviar_bw()
     idx0 = cmd.nlines()
     t_conn = t_disc = None
     if not failures:
         responses["listen"] = send_command(cmd, "LISTEN ON", win)
-        if judge_command(responses["listen"], "LISTEN ON", failures):
+        if judge_command(responses["listen"], "LISTEN ON", failures, warnings, req):
             rlog.log("waiting_for_connection")
             r = cmd.wait_line(RX_CONNECTED, m["listen_timeout_s"], start=idx0)
             if r is None:
@@ -227,9 +350,9 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
             else:
                 t_conn = r[1][0]
                 res["connected"] = parse_connected(r[1][1], m["bw_command"], m["mycall"],
-                                                      m["peer_call"], "listen")
+                                                   m["peer_call"], "listen")
                 failures += connected_failures(res["connected"])
-                if args.bw_when == "after":   # igual que el emisor: tras CONNECTED
+                if args.bw_when == "after":   # as on the sender: after CONNECTED
                     enviar_bw()
                 try:
                     cab = data.read_exact(HEADER_LEN, m["idle_timeout_s"])
@@ -250,59 +373,74 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                     if not res["matches_expected_payload"]:
                         failures.append("payload does not match the seeded payload")
                 except (TimeoutError, ConnectionError, ValueError) as e:
-                    failures.append(f"port 8301 read failed: {e!r}")
+                    failures.append(f"data port read failed: {e!r}")
 
-                # Bytes extra: espera de gracia y luego cuenta todo lo recibido en 8301.
+                # Extra bytes: wait a grace period, then count everything received.
                 time.sleep(m["extra_bytes_grace_s"])
                 d = cmd.wait_line(RX_DISCONNECTED, m["disconnect_wait_s"], start=idx0)
                 if d:
                     t_disc = d[1][0]
     res["final_state"], res["cleanup_disconnect"] = ensure_disconnected(
         cmd, m["disconnect_wait_s"], idx0, win)
+    if "listen" in responses:
+        # Mercury 1.9.19 stays LISTENING after the TCP client leaves (listen_enabled is
+        # kept) and buffers what a caller sends until the next client connects. Release
+        # it, so that a sender started too early fails cleanly instead of delivering
+        # into the next run.
+        responses["listen_off"] = send_command(cmd, "LISTEN OFF", win)
+        if responses["listen_off"]["response"] != "OK":
+            warnings.append(f"LISTEN OFF: no OK ({responses['listen_off']['lines']})")
 
     esperado_total = HEADER_LEN + res.get("declared_length", 0)
     total = sum(n for _, n in data.chunks)
     res["data_port_total_bytes"] = total
     res["data_port_expected_bytes"] = esperado_total
     if total > esperado_total:
-        failures.append(f"extra bytes on port 8301: {total - esperado_total}")
+        failures.append(f"extra bytes on the data port: {total - esperado_total}")
     tol = m["session_tolerance_ms"] * 1_000_000
     fuera = sum(n for t, n in data.chunks
                 if (t_conn is None or t < t_conn - tol)
                 or (t_disc is not None and t > t_disc + tol))
     res["data_port_bytes_outside_session"] = fuera
     if fuera:
-        failures.append(f"{fuera} bytes on port 8301 outside the CONNECTED session")
+        failures.append(f"{fuera} bytes on the data port outside the CONNECTED session")
     res["data_port_chunks"] = [{"t_mono_ns": t, "bytes": n} for t, n in data.chunks]
+    # A session that began before this PC listened (the sender started first, or the
+    # modem was still listening from an earlier run). Not a modem failure.
+    with cmd.cond:
+        lines_ns = list(cmd.lines[idx_start:])
+    early = early_session(data.chunks, cmd.tx_times.get("LISTEN ON"), lines_ns, t_conn)
+    if early:
+        res["procedure_fault"] = True
+        res["procedure_fault_detail"] = early
+        failures.insert(0, "PROCEDURE: the modem already had a session before this PC was "
+                           "listening (PC A started before PC B showed waiting_for_connection, "
+                           "or the modem was still listening from an earlier run). Not a modem "
+                           "failure; repeat this test, PC B first")
 
     if res["final_state"] != "disconnected":
         failures.append("DISCONNECTED was not confirmed")
-    res["responses"] = responses
-    res["command_response_error"] = has_error(
-        [l for v in responses.values() for l in v["lines"]], m.get("error_patterns", []))
-    if res["command_response_error"]:
-        failures.append("a command response matches error_patterns")
-    res["failures"] = failures
+    finish(res, cmd, m, responses, failures, warnings, idx_start)
     res["delivered_intact"] = (not failures and res.get("matches_expected_payload") is True
-                                and res.get("truncated_hash_matches") is True)
+                               and res.get("truncated_hash_matches") is True)
     return res
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Mercury modem smoke client.")
+    ap = argparse.ArgumentParser(description="Modem smoke client (Mercury or VARA HF).")
     ap.add_argument("mode", choices=["send", "listen"])
     ap.add_argument("--config", default="smoke_config.toml")
     ap.add_argument("--phase", choices=["e0", "smoke"], default="e0")
     ap.add_argument("--tag", required=True, help="For example: E0-1_1KB, E0-2_V1, H1-1")
     ap.add_argument("--payload-size", type=int, default=200)
     ap.add_argument("--bw-when", choices=["before", "after", "none"], default="before",
-                    help="before: BW before CONNECT/LISTEN ON; after: after CONNECTED "
-                         "(sender) or LISTEN ON (receiver); none: do not send BW")
+                    help="before: BW before CONNECT/LISTEN ON; after: after CONNECTED; "
+                         "none: do not send BW")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
     rlog = RunLog(cfg, args.phase, args.tag)
-    m = cfg["mercury"]
+    m = tnc_config(cfg)
     ports = (m["cmd_port"], m["data_port"])
     cmd = data = None
     env: dict = {}
@@ -310,16 +448,16 @@ def main() -> int:
     exit_code = 1
     try:
         env = capture_environment(cfg, rlog, puertos=ports)
-        cmd = TcpCapture("8300", m["host"], m["cmd_port"], rlog, line_mode=True)
-        data = TcpCapture("8301", m["host"], m["data_port"], rlog, line_mode=False)
+        cmd = TcpCapture(str(m["cmd_port"]), m["host"], m["cmd_port"], rlog, line_mode=True)
+        data = TcpCapture(str(m["data_port"]), m["host"], m["data_port"], rlog, line_mode=False)
         res = (run_send if args.mode == "send" else run_listen)(args, cfg, rlog, cmd, data)
         exit_code = 0 if (res.get("sender_completed") or res.get("delivered_intact")) else 1
-    except Exception as e:  # noqa: BLE001 - se registra el error completo
+    except Exception as e:  # noqa: BLE001 - the full error is recorded
         res["exception"] = traceback.format_exc()
         res["failures"] = res.get("failures", []) + [f"exception: {e!r}"]
         rlog.log("exception", detail=res["exception"])
     finally:
-        # Estado de cada socket: distingue cierre limpio, timeout y error del socket.
+        # Socket state distinguishes a clean close, a timeout and a socket error.
         res["sockets"] = {s.name: s.state() for s in (cmd, data) if s}
         for s in (cmd, data):
             if s:
@@ -342,4 +480,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

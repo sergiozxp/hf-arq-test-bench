@@ -91,6 +91,8 @@ def main() -> int:
         window._start_mercury()
         check(pump(lambda: "listening on 8300 and 8301" in window.mercury_status.cget("text"), 60),
               "GUI started Mercury and it owns 8300/8301: " + window.mercury_status.cget("text"))
+        check(pump(lambda: window.status_monitor is not None and window.status_monitor.latest is not None, 30),
+              "the level meter receives Mercury's status: " + window.meter_label.cget("text"))
         session_dir = Path(window.session["session_dir"])
         recorded = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
         check(recorded["pid"] == window.mercury.pid and recorded["zip_official"], "session.json records PID and ZIP")
@@ -109,8 +111,25 @@ def main() -> int:
         window._stop()
         check(pump(lambda: not window._test_running(), 120), "receiver test stopped")
 
+        # VARA section of the real window: switching modem, and a VARA.exe that does not exist.
+        window.values["modem"].set("vara")
+        window._modem_changed()
+        window.values["vara_exe"].set(str(work / "no" / "VARA.exe"))
+        window._check_vara()
+        check(pump(lambda: "NOT READY" in window.vara_status.cget("text"), 30),
+              "VARA check reports a missing VARA.exe: " + window.vara_status.cget("text"))
+        window.values["modem"].set("mercury")
+        window._modem_changed()
+
+        # Session cross-check through the real window's runner (this PC against itself).
+        window._run_commands([["smoke_cross_check.py", "--pair", str(smoke_gui.RESULTS),
+                               str(smoke_gui.RESULTS)]], None)
+        check(pump(lambda: "SESSION CROSS-CHECK" in window.summary.cget("text"), 30),
+              "session cross-check summary shown: " + window.summary.cget("text"))
+
         window._stop_mercury()
-        check(not window.mercury.running(), "GUI stopped Mercury")
+        check(not window.mercury.running() and window.status_monitor is None, "GUI stopped Mercury and the meter")
+        check((session_dir / "mercury_status.jsonl").stat().st_size > 0, "status log written in the session folder")
         ended = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
         check(ended.get("stop_reason") == "stopped_by_operator", "session end recorded")
     finally:

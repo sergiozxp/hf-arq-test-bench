@@ -1,18 +1,24 @@
-# Copy this file to smoke_config.toml on each PC and edit the callsigns.
+# Copy this file to smoke_config.toml on each PC when running the scripts by hand.
+# The GUI writes it for you. Each PC has its own callsign; use numeric SSIDs (-1, -2):
+# VARA treats -T, -R, -X and -L as special extensions.
 [general]
 results_dir = "results"
 payload_seed = 20261021
 max_payload_bytes = 1048576
-protocol_version = "5.0"
+protocol_version = "5.1"
 smoke_profile = "MS-1.0"
-app_version = "0.2.0-alpha.2"
+app_version = "0.2.0-alpha.3"
 
-[mercury]
+[modem]
+name = "mercury"            # "mercury" or "vara"
+arm = "Mercury 1.9.19"      # or "VARA HF unlicensed" / "VARA HF licensed"
+
+[tnc]
 host = "127.0.0.1"
 cmd_port = 8300
 data_port = 8301
-mycall = "CALL-A"
-peer_call = "CALL-B"
+mycall = "XQ2CG-1"          # PC A: XQ2CG-1 / PC B: XQ2CG-2
+peer_call = "XQ2CG-2"
 bw_command = "BW500"
 cmd_response_window_s = 2.0
 connect_timeout_s = 180
@@ -27,12 +33,16 @@ error_patterns = []
 [binaries]
 mercury_zip = ""
 mercury_exe = ""
+vara_exe = ""               # for example 'C:\VARA\VARA.exe' (single quotes keep backslashes)
 
 [evidence]
 mercury_ini = ""
 mercury_log = ""
 mercury_console = ""
+vara_ini = ""               # archived with registration codes and password removed
 
 # Written by the GUI when it starts Mercury. Run by hand: Mercury was started outside the GUI.
 [mercury_session]
 launched_by_gui = false
+
+[vara_session]

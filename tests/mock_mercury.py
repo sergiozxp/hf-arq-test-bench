@@ -20,9 +20,17 @@ def start_endpoint(name: str, peer: str, command_port: int, data_port: int) -> N
         listeners.append(listener)
 
     def serve() -> None:
-        command_socket, _ = listeners[0].accept()
-        data_socket, _ = listeners[1].accept()
-        STATE[name].update(command_socket=command_socket, data_socket=data_socket)
+        # One session per client connection, any number of times (one per test).
+        while True:
+            command_socket, _ = listeners[0].accept()
+            data_socket, _ = listeners[1].accept()
+            STATE[name].update(command_socket=command_socket, data_socket=data_socket)
+            try:
+                session(command_socket, data_socket)
+            except OSError:
+                pass
+
+    def session(command_socket, data_socket) -> None:
 
         def relay_data() -> None:
             while True:
@@ -75,4 +83,4 @@ def start_endpoint(name: str, peer: str, command_port: int, data_port: int) -> N
 
 start_endpoint("A", "B", 18300, 18301)
 start_endpoint("B", "A", 19300, 19301)
-time.sleep(60)
+time.sleep(900)

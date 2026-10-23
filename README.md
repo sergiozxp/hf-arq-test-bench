@@ -14,29 +14,41 @@ message-workflow behaviour.
 
 ## Status
 
-This is v0.2.0-alpha.2. The repository contains a Mercury-only smoke profile
-and the v5 protocol specification. The smoke GUI starts Mercury 1.9.19 from the
-verified official ZIP, lets the operator pick the sound devices Mercury lists,
-and checks that Mercury owns ports 8300 and 8301 before every test.
+This is v0.2.0-alpha.3. The smoke GUI runs profile MS-1.0 (E0-1, E0-2, H1) against
+Mercury 1.9.19, which it starts from the verified official ZIP, and against VARA
+HF 4.9.0, which the operator opens. It shows Mercury's live levels, checks which
+program owns ports 8300 and 8301 before every test, and cross-checks a whole
+session against the other PC's results ZIP.
 
-The direct VARA adapter, common benchmark client and channel simulator are not
-implemented yet. No performance results are published. Continuous integration
-runs the real Mercury 1.9.19 on Windows without a sound card (null audio); the
-smoke test itself has not yet been completed between two real PCs.
+The Mercury smoke test (E0-1, E0-2, H1) passed between two real PCs on
+2026-10-22 with alpha.2. VARA support is new in alpha.3 and has been tested only
+against a simulator. The common benchmark client (E0-3), the channel simulator and
+performance results are not implemented yet.
 
 The historical v0.1.0 release remains unchanged. It used the earlier Mercury
 plus Pat scope and is superseded for new work.
 
+### Changes in 0.2.0-alpha.3
+
+- Safe cross-check: pairs of different tests are rejected even when the payload
+  hashes match; run ids are reported; a whole session is paired from the other
+  PC's results ZIP, with unpaired and crossed runs listed.
+- The selected test is shown in large type ("This PC will run: H1-2 as RECEIVER").
+- Level meter from Mercury's status (TX peak dBFS, SNR, sound card state), logged
+  and summarised per test.
+- VARA HF 4.9.0 adapter for the smoke profile: modem selector, VARA.exe hash,
+  VARA.ini archived without registration codes, licence state, port owner check,
+  VERSION / P2P SESSION / CHAT OFF.
+- Protocol v5.1: common numeric-SSID callsigns, VARA session settings, pairing
+  rules, infrastructure-fault outcome.
+
 ### Changes in 0.2.0-alpha.2
 
 - Start and stop Mercury from the GUI, from the official ZIP verified by SHA-256.
-- Audio device selector filled from Mercury's own device list, with a UCA222
-  suggestion and a warning when the device is the Windows default.
-- Port check before every test: 8300 and 8301 must belong to that Mercury.
-- The Mercury command line, generated mercury.ini, log and console output are
+- Audio device selector filled from Mercury's own device list.
+- Port check before every test; Mercury's configuration, log and console output
   recorded with every test.
-- "Repeat (H1 only)" is now "H1 repetition number (1–3)", and E0-2 V3 was
-  withdrawn because it repeated V1.
+- "H1 repetition number (1–3)"; E0-2 V3 withdrawn.
 
 ## Current contents
 
@@ -44,7 +56,7 @@ plus Pat scope and is superseded for new work.
 - docs/modem_smoke_profile_ms1.md
 - docs/windows_modem_smoke_guide.md
 - docs/protocol_compatibility.md
-- smoke/: Mercury 1.9.19 preflight scripts and the Windows GUI that starts Mercury
+- smoke/: preflight scripts for Mercury 1.9.19 and VARA HF 4.9.0, and the Windows GUI
 
 ## Scope of the first benchmark table
 

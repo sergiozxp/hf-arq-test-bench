@@ -178,8 +178,41 @@ def capture_system() -> dict:
     }
 
 
+# VARA.ini keys whose values must never leave the PC. The registration code is a
+# paid licence; the encryption password is a secret. Their values are replaced in
+# every archived copy, and only whether a registration code was present is kept.
+SECRET_INI_KEYS = re.compile(
+    r"^(?P<key>\s*(?:Registration Code(?:\s*\d+)?|Password encryption)\s*=)(?P<value>[^\r\n]*)",
+    re.I | re.M,
+)
+REDACTED = "<redacted by HF-ARQ Modem Smoke>"
+
+
+def redact_ini_text(text: str) -> tuple[str, list[str], bool]:
+    """Return (redacted text, redacted key names, registration code present)."""
+    keys: list[str] = []
+    registered = False
+
+    def replace(match: re.Match) -> str:
+        nonlocal registered
+        value = match.group("value").strip()
+        if not value:
+            return match.group(0)
+        name = match.group("key").split("=")[0].strip()
+        keys.append(name)
+        if name.lower().startswith("registration code"):
+            registered = True
+        return match.group("key") + REDACTED
+
+    return SECRET_INI_KEYS.sub(replace, text), keys, registered
+
+
 def archive_evidence_files(cfg: dict, rlog: RunLog, etapa: str) -> dict:
-    """Copy configured evidence files and return hashes and source metadata."""
+    """Copy configured evidence files and return hashes and source metadata.
+
+    Files whose key starts with "vara_ini" are copied with their secret values
+    redacted; the recorded SHA-256 is that of the redacted copy.
+    """
     salida = {}
     destino = rlog.dir / "evidence" / etapa
     for nombre, ruta in cfg.get("evidence", {}).items():
@@ -190,14 +223,35 @@ def archive_evidence_files(cfg: dict, rlog: RunLog, etapa: str) -> dict:
             # Prefix with the config key so equal basenames cannot collide.
             copia = destino / f"{nombre}__{Path(ruta).name}"
             origen = os.stat(ruta)
-            shutil.copy(ruta, copia)
+            extra = {}
+            if nombre.startswith("vara_ini"):
+                raw = Path(ruta).read_bytes().decode("latin-1")
+                text, keys, registered = redact_ini_text(raw)
+                copia.write_bytes(text.encode("latin-1"))
+                extra = {"redacted_keys": keys, "registration_code_present": registered}
+            else:
+                shutil.copy(ruta, copia)
             # A live log is a snapshot; preserve its size and mtime when copied.
             salida[nombre] = {"ruta": ruta, "sha256": sha256_file(copia),
                               "bytes_origen": origen.st_size, "mtime_origen": origen.st_mtime,
-                              "bytes_copia": copia.stat().st_size}
+                              "bytes_copia": copia.stat().st_size, **extra}
         except OSError as e:
             salida[nombre] = {"ruta": ruta, "error": repr(e)}
     return salida
+
+
+def process_name(pid: int) -> str | None:
+    """Return the image name of a Windows process (for example VARA.exe), or None."""
+    if os.name != "nt":
+        return None
+    out = _run_command(["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"], 15)
+    match = re.match(r'^\s*"([^"]+)","%d"' % int(pid), out)
+    return match.group(1) if match else None
+
+
+def tnc_config(cfg: dict) -> dict:
+    """Return the TNC settings; [tnc] since 0.2.0-alpha.3, [mercury] before."""
+    return cfg.get("tnc") or cfg["mercury"]
 
 
 def evidence_issues(cfg: dict, env: dict, end: dict) -> dict:
@@ -276,6 +330,7 @@ class TcpCapture:
         self._idx = open(rlog.dir / f"raw_rx_{name}.idx.jsonl", "w", encoding="utf-8")
         self._txidx = open(rlog.dir / f"raw_tx_{name}.idx.jsonl", "w", encoding="utf-8")
         self._tx_off = 0
+        self.tx_times: dict[str, int] = {}   # label -> monotonic time of its first send
         self.sock = socket.create_connection((host, port), timeout=10)
         self.sock.settimeout(0.5)
         self._stop = threading.Event()
@@ -325,6 +380,8 @@ class TcpCapture:
     # --- send
     def send(self, data: bytes, label: str = "") -> None:
         t0, u0 = mono_ns(), utc_iso()
+        if label:
+            self.tx_times.setdefault(label, t0)
         self.sock.sendall(data)
         t1 = mono_ns()
         self._tx.write(data)

@@ -1,71 +1,273 @@
-"""Cross-check sender and receiver Mercury smoke results.
+"""smoke_cross_check.py - verify delivery between a sender and a receiver result.
 
-Usage:
-    python smoke_cross_check.py <sender-result.json> <receiver-result.json>
+USAGE
+  One pair:
+    python smoke_cross_check.py <sender result.json> <receiver result.json>
+  Every pair of a session (this PC's results and the other PC's ZIP or folder):
+    python smoke_cross_check.py --pair <local results folder> <other PC ZIP or folder>
 
-The script verifies intact application payload delivery. A sender-side BUFFER 0
-is only an ARQ-level acknowledgement and never proves delivery.
+WHAT IT DOES
+  - Declares delivery only if the receiver verified the payload hash and it matches
+    the sender's, and keeps that separate from the sender's ARQ confirmation (BUFFER 0).
+  - Refuses to compare two different tests: the tag, bandwidth timing, payload size,
+    modem, arm and callsigns of the two results must agree ("invalid_pair"). Two
+    tests that share a payload (E0-2 V2 and H1 both send the same 200 bytes) would
+    otherwise pass.
+  - --pair matches every sender run with the receiver run of the same tag that
+    started closest in time, writes cross_check.json beside each receiver result,
+    and writes a session report (JSON and CSV). Runs left without a partner are
+    listed, and a sender and a receiver that started together with different tags
+    are reported as a crossed run.
+
+WHAT IT DOES NOT
+  - Run or repeat tests, or touch the modem.
+  - Compare times between PCs: their clocks are not synchronised in the smoke test.
 """
 from __future__ import annotations
 
+import csv
 import json
+import re
 import sys
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
+
+RUN_DIR_RE = re.compile(r"^(?P<tag>.+)_(?P<start>\d{8}T\d{6}Z)_(?P<rid>[0-9a-f]{6})$")
+# A receiver is started first; the sender follows within this window (seconds,
+# sender start minus receiver start). The negative margin absorbs clock offset.
+PAIR_WINDOW_S = (-120, 600)
+CROSSED_WINDOW_S = 120
+
+
+def _get(result: dict, *keys):
+    for key in keys:
+        if result.get(key) is not None:
+            return result[key]
+    return None
+
+
+def pair_mismatches(em: dict, rx: dict) -> list[str]:
+    """Return the reasons why two results do not belong to the same test."""
+    reasons = []
+    if em.get("mode") != "send":
+        reasons.append("the first result is not a sender result")
+    if rx.get("mode") != "listen":
+        reasons.append("the second result is not a receiver result")
+    if em.get("tag") != rx.get("tag"):
+        reasons.append(f"different tests: sender {em.get('tag')}, receiver {rx.get('tag')}")
+    if em.get("bw_when") != rx.get("bw_when"):
+        reasons.append(f"bandwidth sent at different moments: sender {em.get('bw_when')}, "
+                       f"receiver {rx.get('bw_when')}")
+    if em.get("bw_command") != rx.get("bw_command"):
+        reasons.append(f"different bandwidth: {em.get('bw_command')} / {rx.get('bw_command')}")
+    sent = _get(em, "payload_bytes")
+    declared = _get(rx, "declared_length")
+    if sent is not None and declared is not None and sent != declared:
+        reasons.append(f"different payload size: sender {sent} B, receiver {declared} B")
+    for key, label in (("modem", "modem"), ("arm", "arm"),
+                       ("protocol_version", "protocol version"), ("smoke_profile", "smoke profile")):
+        a, b = em.get(key), rx.get(key)
+        # Results written before 0.2.0-alpha.3 have no modem or arm: Mercury is assumed.
+        if key in ("modem", "arm") and (a is None or b is None):
+            continue
+        if a != b:
+            reasons.append(f"different {label}: {a} / {b}")
+    if em.get("mycall") and rx.get("mycall"):
+        dest = _get(em, "destination", "peer_call")
+        if dest and dest.upper() != rx["mycall"].upper():
+            reasons.append(f"the sender called {dest} but the receiver is {rx['mycall']}")
+        if rx.get("peer_call") and rx["peer_call"].upper() != em["mycall"].upper():
+            reasons.append(f"the receiver expected {rx['peer_call']} but the sender is {em['mycall']}")
+    return reasons
+
+
+def cross_check(em: dict, rx: dict) -> dict:
+    """Compare one sender result with one receiver result."""
+    hash_ok = em.get("payload_sha256") is not None and \
+        em.get("payload_sha256") == rx.get("payload_sha256")
+    warnings = []
+    if em.get("arq_confirmed") and not rx.get("delivered_intact"):
+        warnings.append("ARQ confirmed (BUFFER 0) but B does not verify the payload: delivery failed")
+    if rx.get("delivered_intact") and not em.get("arq_confirmed"):
+        warnings.append("B verified the payload but A did not observe BUFFER 0 (ARQ not observed)")
+    if not hash_ok:
+        warnings.append("sender and receiver SHA-256 differ or one is missing")
+    incomplete = (em.get("incomplete_evidence") or []) + (rx.get("incomplete_evidence") or [])
+    if incomplete:
+        warnings.append(f"incomplete evidence (required by MS-1.0): {incomplete}")
+    protocol = (em.get("protocol_warnings") or []) + (rx.get("protocol_warnings") or [])
+    # VARA states the link mode itself ("LINK UNREGISTERED"); it must agree with the arm.
+    for side, res in (("sender", em), ("receiver", rx)):
+        state = (res.get("link_stats") or {}).get("link_state")
+        arm = (res.get("arm") or "").lower()
+        if state and ("licensed" in arm) and (("unlicensed" in arm) != (state == "unregistered")):
+            warnings.append(f"{side}: VARA reported a {state} link but the arm is {res.get('arm')}")
+    mismatches = pair_mismatches(em, rx)
+    result = {
+        "sender_tag": em.get("tag"), "receiver_tag": rx.get("tag"),
+        "sender_run_id": em.get("run_id"), "receiver_run_id": rx.get("run_id"),
+        "modem": em.get("modem", "mercury"), "arm": em.get("arm"),
+        "sender_arq_confirmed": em.get("arq_confirmed"),
+        "receiver_delivered_intact": rx.get("delivered_intact"),
+        "sender_receiver_hash_matches": hash_ok,
+        "sender_failures": em.get("failures"), "receiver_failures": rx.get("failures"),
+        "sender_warnings": em.get("warnings"), "receiver_warnings": rx.get("warnings"),
+        "protocol_warnings": protocol,
+        "pair_mismatches": mismatches,
+        "warnings": warnings,
+        "protocol_version": em.get("protocol_version") or rx.get("protocol_version"),
+        "smoke_profile": em.get("smoke_profile") or rx.get("smoke_profile"),
+    }
+    delivered = bool(hash_ok and rx.get("delivered_intact") and em.get("sender_completed"))
+    if mismatches:
+        result["outcome"] = "invalid_pair"
+    elif em.get("infrastructure_fault") or rx.get("infrastructure_fault"):
+        result["outcome"] = "infrastructure_fault"
+    elif em.get("procedure_fault") or rx.get("procedure_fault"):
+        result["outcome"] = "procedure_fault"
+    elif not delivered:
+        result["outcome"] = "failed"
+    else:
+        # "incomplete": delivery verified, but evidence that MS-1.0 requires is missing.
+        result["outcome"] = "incomplete" if incomplete else "passed"
+    return result
+
+
+# ------------------------------------------------------------------ session pairing
+def safe_extract(archive: Path, destination: Path) -> Path:
+    """Extract a ZIP, refusing members that would land outside the destination."""
+    destination.mkdir(parents=True, exist_ok=True)
+    root = destination.resolve()
+    with zipfile.ZipFile(archive) as z:
+        for member in z.infolist():
+            target = (destination / member.filename).resolve()
+            if root != target and root not in target.parents:
+                raise ValueError(f"unsafe path in ZIP: {member.filename}")
+        z.extractall(destination)
+    return destination
+
+
+def find_runs(root: Path, origin: str) -> list[dict]:
+    runs = []
+    for path in sorted(root.rglob("result.json")):
+        relative = path.relative_to(root).parts
+        if "mercury_sessions" in relative or "cross_checks" in relative:
+            continue
+        match = RUN_DIR_RE.match(path.parent.name)
+        if not match:
+            continue
+        try:
+            result = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        start = datetime.strptime(match.group("start"), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        runs.append({"path": path, "dir": path.parent.name, "tag": match.group("tag"),
+                     "start": start, "origin": origin, "mode": result.get("mode"),
+                     "result": result})
+    return runs
+
+
+def pair_runs(runs: list[dict]) -> tuple[list[tuple[dict, dict]], list[dict], list[dict]]:
+    """Pair senders with receivers by tag and start time.
+
+    Returns (pairs, unpaired runs, crossed runs). A crossed run is an unpaired sender
+    and an unpaired receiver with different tags that started within two minutes of
+    each other: the two PCs ran different tests at the same time.
+    """
+    senders = [r for r in runs if r["mode"] == "send"]
+    receivers = [r for r in runs if r["mode"] == "listen"]
+    candidates = []
+    for s in senders:
+        for r in receivers:
+            delta = (s["start"] - r["start"]).total_seconds()
+            if s["tag"] == r["tag"] and PAIR_WINDOW_S[0] <= delta <= PAIR_WINDOW_S[1]:
+                candidates.append((abs(delta), id(s), id(r), s, r))
+    candidates.sort(key=lambda item: item[0])
+    used, pairs = set(), []
+    for _gap, sid, rid, s, r in candidates:
+        if sid in used or rid in used:
+            continue
+        used.update((sid, rid))
+        pairs.append((s, r))
+    pairs.sort(key=lambda pair: pair[0]["start"])
+    unpaired = [r for r in senders + receivers if id(r) not in used]
+    crossed = []
+    for s in (r for r in unpaired if r["mode"] == "send"):
+        for r in (r for r in unpaired if r["mode"] == "listen"):
+            if s["tag"] != r["tag"] and abs((s["start"] - r["start"]).total_seconds()) <= CROSSED_WINDOW_S:
+                crossed.append({"sender": s["dir"], "receiver": r["dir"],
+                                "sender_tag": s["tag"], "receiver_tag": r["tag"]})
+    return pairs, unpaired, crossed
+
+
+def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
+    """Cross-check every pair found in this PC's results and the other PC's results."""
+    if other.is_file() and other.suffix.lower() == ".zip":
+        other = safe_extract(other, out_dir / "other_pc" / other.stem)
+    runs = find_runs(local, "this PC") + find_runs(other, "other PC")
+    pairs, unpaired, crossed = pair_runs(runs)
+    rows = []
+    for s, r in pairs:
+        result = cross_check(s["result"], r["result"])
+        result["sender_dir"], result["receiver_dir"] = s["dir"], r["dir"]
+        result["sender_pc"], result["receiver_pc"] = s["origin"], r["origin"]
+        result["sender_start_utc"] = s["start"].isoformat()
+        result["receiver_start_utc"] = r["start"].isoformat()
+        r["path"].with_name("cross_check.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        rows.append(result)
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["outcome"]] = counts.get(row["outcome"], 0) + 1
+    report = {
+        "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "local_results": str(local), "other_results": str(other),
+        "pairs": rows, "counts": counts,
+        "unpaired": [{"dir": u["dir"], "tag": u["tag"], "mode": u["mode"], "pc": u["origin"]}
+                     for u in unpaired],
+        "crossed_runs": crossed,
+    }
+    report["outcome"] = ("passed" if rows and set(counts) == {"passed"} and not crossed
+                         else "review")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "cross_check_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    with open(out_dir / "cross_check_report.csv", "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle, delimiter=";")
+        writer.writerow(["sender_start_utc", "tag", "outcome", "modem", "arm", "sender_run",
+                         "receiver_run", "hash_matches", "pair_mismatches", "warnings"])
+        for row in rows:
+            writer.writerow([row["sender_start_utc"], row["sender_tag"], row["outcome"],
+                             row["modem"], row["arm"], row["sender_dir"], row["receiver_dir"],
+                             row["sender_receiver_hash_matches"],
+                             " | ".join(row["pair_mismatches"]), " | ".join(row["warnings"])])
+    return report
 
 
 def main() -> int:
+    if len(sys.argv) == 4 and sys.argv[1] == "--pair":
+        local, other = Path(sys.argv[2]), Path(sys.argv[3])
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        out_dir = local / "cross_checks" / stamp
+        report = pair_session(local, other, out_dir)
+        print(json.dumps({k: report[k] for k in ("outcome", "counts", "unpaired", "crossed_runs")},
+                         ensure_ascii=False, indent=2))
+        for row in report["pairs"]:
+            print(f"{row['sender_tag']:<12} {row['outcome']:<20} {row['sender_dir']} <-> {row['receiver_dir']}")
+        print(f"\nReport saved to: {out_dir / 'cross_check_report.json'}")
+        return 0 if report["outcome"] == "passed" else 1
     if len(sys.argv) != 3:
         print(__doc__)
         return 2
-    sender = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    receiver = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-    hash_matches = (
-        sender.get("payload_sha256") is not None
-        and sender.get("payload_sha256") == receiver.get("payload_sha256")
-    )
-    warnings: list[str] = []
-    if sender.get("arq_confirmed") and not receiver.get("delivered_intact"):
-        warnings.append("Sender observed BUFFER 0, but the receiver did not verify the payload.")
-    if receiver.get("delivered_intact") and not sender.get("arq_confirmed"):
-        warnings.append("Receiver verified the payload, but the sender did not observe BUFFER 0.")
-    if not hash_matches:
-        warnings.append("Sender and receiver SHA-256 values do not match or are missing.")
-    incomplete_evidence = (
-        (sender.get("incomplete_evidence") or [])
-        + (receiver.get("incomplete_evidence") or [])
-    )
-    if incomplete_evidence:
-        warnings.append("Required evidence could not be archived: " + "; ".join(incomplete_evidence))
-
-    delivery_verified = bool(
-        hash_matches
-        and receiver.get("delivered_intact")
-        and sender.get("sender_completed")
-    )
-    result = {
-        "sender_tag": sender.get("tag"),
-        "receiver_tag": receiver.get("tag"),
-        "sender_arq_confirmed": sender.get("arq_confirmed"),
-        "receiver_delivered_intact": receiver.get("delivered_intact"),
-        "sender_receiver_hash_matches": hash_matches,
-        "sender_failures": sender.get("failures"),
-        "receiver_failures": receiver.get("failures"),
-        "sender_warnings": sender.get("warnings"),
-        "receiver_warnings": receiver.get("warnings"),
-        "warnings": warnings,
-        "protocol_version": sender.get("protocol_version") or receiver.get("protocol_version"),
-        "smoke_profile": sender.get("smoke_profile") or receiver.get("smoke_profile"),
-        "outcome": (
-            "failed" if not delivery_verified
-            else "incomplete" if incomplete_evidence
-            else "passed"
-        ),
-    }
-    output_path = Path(sys.argv[2]).with_name("cross_check.json")
-    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    em = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    rx = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+    result = cross_check(em, rx)
+    output = Path(sys.argv[2]).with_name("cross_check.json")
+    output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["outcome"] == "passed" else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

@@ -25,7 +25,11 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           python tests/test_logic.py
           python tests/test_runtime.py
+          python tests/test_cross_check.py
+          python tests/test_status.py
+          python tests/test_vara.py
           python tests/test_simulated_gui.py
+          python tests/test_receiver_rules.py
           python tests/test_launcher.py --launcher "python smoke/smoke_gui.py"
       - name: Download the official Mercury 1.9.19 Windows ZIP
         shell: pwsh
