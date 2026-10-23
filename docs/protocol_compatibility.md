@@ -27,6 +27,11 @@ Status legend: **confirmed** = observed with the real modem and archived evidenc
 Mercury evidence: smoke test of 2026-10-22 (protocol 5.0, profile MS-1.0, app
 0.2.0-alpha.2), 9 valid pairs, archived results of both PCs.
 
+Mercury again with app 0.2.0-alpha.3 (protocol 5.1) on 2026-10-23 01:15–01:31 UTC,
+as one full sequence per PC: 8 pairs passed, no unpaired or crossed runs, `LISTEN OFF`
+→ `OK` after every receiver run. Mercury stayed at `BITRATE (3) 321 BPS`; 10 KiB took
+388 s at the sender. Mercury reported SN about 25 dB at PC A and 10–13 dB at PC B.
+
 VARA evidence: smoke test of 2026-10-22, VARA HF 4.9.0 unlicensed on both PCs
 (VARA.exe SHA-256 c69b8c81…f00486f), app 0.2.0-alpha.3, protocol 5.1: E0-1 (16 B,
 1 KiB, 10 KiB), E0-2 V1 and V2, H1 ×3, 8 pairs passed. In BW500 the unregistered
