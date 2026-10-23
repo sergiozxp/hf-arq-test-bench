@@ -33,6 +33,8 @@ import mercury_status
 import smoke_cross_check  # noqa: F401  # included by PyInstaller
 import smoke_sequence  # noqa: F401  # included by PyInstaller
 import bench_calibration  # noqa: F401  # included by PyInstaller
+import channel_sim  # noqa: F401  # included by PyInstaller (numpy; sounddevice is imported when run)
+import sim_window
 import vara_runtime as vara
 from smoke_common import listeners_with_pid, netstat_text, process_name
 
@@ -298,8 +300,11 @@ class ModemSmokeWindow(tk.Tk):
         ttk.Button(tools, text="Cross-check two result files…", command=self._cross_check).grid(
             row=0, column=3, padx=4, pady=6
         )
+        ttk.Button(tools, text="Channel simulator (PC B)…", command=self._open_simulator).grid(
+            row=0, column=4, padx=4, pady=6
+        )
         ttk.Label(tools, text=f"Working directory: {HERE}", foreground="#555").grid(
-            row=1, column=0, columnspan=4, sticky="w", padx=8
+            row=1, column=0, columnspan=5, sticky="w", padx=8
         )
 
         output = ttk.LabelFrame(self, text="4. Result")
@@ -1114,6 +1119,18 @@ class ModemSmokeWindow(tk.Tk):
             self.event_queue.put(("summary", cross_check.read_text(encoding="utf-8")))
         self.event_queue.put(("done", ""))
 
+    def _open_simulator(self) -> None:
+        window = getattr(self, "simulator_window", None)
+        if window is not None and window.winfo_exists():
+            window.lift()
+            return
+        if self.values["role"].get() != "B" and not messagebox.askyesno(
+                "Channel simulator", "The simulator runs on PC B, next to the receiving modem, with its own "
+                "interface (UCA-S). Open it on this PC anyway?"):
+            return
+        RESULTS.mkdir(exist_ok=True)
+        self.simulator_window = sim_window.SimulatorWindow(self, process_command, HERE, RESULTS)
+
     def _close(self) -> None:
         if self._test_running():
             if not messagebox.askyesno("Test in progress", "Close and stop it?"):
@@ -1131,6 +1148,11 @@ class ModemSmokeWindow(tk.Tk):
                 self._record_session_end("stopped_on_close", code)
             else:
                 self._record_session_end("left_running_on_close", None)
+        window = getattr(self, "simulator_window", None)
+        if window is not None and window.winfo_exists() and window.running():
+            if not messagebox.askyesno("Simulator running", "Stop the channel simulator and close?"):
+                return
+            window._stop()
         if self.status_monitor:
             self.status_monitor.stop()
         self.destroy()

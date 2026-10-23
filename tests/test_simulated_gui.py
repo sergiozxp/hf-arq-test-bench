@@ -41,7 +41,7 @@ class Root(Widget):
 
 
 tk = types.ModuleType("tkinter")
-tk.Tk, tk.StringVar, tk.IntVar = Root, Variable, Variable
+tk.Tk, tk.StringVar, tk.IntVar, tk.Toplevel = Root, Variable, Variable, Root
 tk.TclError = RuntimeError
 for name in ("Text", "Label", "Button"):
     setattr(tk, name, Widget)
@@ -124,6 +124,25 @@ window.vara_info = {"settings": {"input_device": "UCA222-A (USB Audio CODEC )",
 assert window.calibration_devices({}) == ("UCA222-A (USB Audio CODEC )", "UCA222-A (USB Audio CODEC )")
 window.test_name.set(smoke_gui.logic.SEQUENCE_TEST)
 window._test_changed()
+
+# Channel simulator window and its control helpers.
+import sim_control
+window.values["role"].set("B")
+window.simulator_window = None
+window._open_simulator()
+sim = window.simulator_window
+assert not sim.running()
+assert sim_control.run_command("UCA222-S (USB Audio CODEC )", "UCA222-S (USB Audio CODEC )", "moderate", 7)[:2] \
+    == ["channel_sim.py", "run"]
+text, color = sim_control.describe_status({"mode": "moderate", "attempt": 7, "seconds_since_audio": 3.0,
+                                           "xruns_total": {"input_overflow": 0, "output_underflow": 0},
+                                           "directions": {"A->B": {"peak_vs_reference_db": 0.2, "active_s": 9,
+                                                                   "output_clipped_samples": 0}}})
+assert color == "green" and "attempt 7" in text, text
+assert sim_control.describe_status({"mode": "poor", "attempt": 1, "xruns_total": {"output_underflow": 1},
+                                    "directions": {}})[1] == "red"
+assert sim_control.describe_reference(None)[1] == "orange"
+assert sim_control.log_folder("x\nSimulator log: results/simulator/abc\n", Path("/w")) == Path("/w/results/simulator/abc")
 
 # The output of a full sequence: progress per test, a result per test, then the record.
 import json

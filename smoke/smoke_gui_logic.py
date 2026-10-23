@@ -384,6 +384,7 @@ SCRIPTS = {
     "smoke_cross_check.py": "smoke_cross_check",
     "smoke_sequence.py": "smoke_sequence",
     "bench_calibration.py": "bench_calibration",
+    "channel_sim.py": "channel_sim",
 }
 
 
