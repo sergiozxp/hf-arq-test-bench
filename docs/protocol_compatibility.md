@@ -45,6 +45,11 @@ Mercury full sequence with app 0.2.0-alpha.4 (protocol 5.2) on 2026-10-23
 04:05–04:23 UTC: 9 of 9 pairs passed, E0-3 included, no unpaired, crossed or
 stopped runs.
 
+VARA HF 4.9.0 unlicensed, full sequence with app 0.2.0-alpha.4 on 2026-10-23
+04:56–05:30 UTC: 9 of 9 pairs passed, E0-3 included (round trip 47.0 s, B's own
+`BUFFER 0` 12.4 s after its write, `DISCONNECTED` at B 4.3 s after A's), `LINK
+UNREGISTERED`, levels 3 and 4 only (61 and 88 bps); 10 KiB took 1115 s at the sender.
+
 VARA HF 4.9.0 licensed, full sequence with app 0.2.0-alpha.4 (protocol 5.2) on
 2026-10-23 04:39–04:52 UTC: 9 of 9 pairs passed, E0-3 included, `LINK REGISTERED`,
 registration code redacted in every archived VARA.ini.

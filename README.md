@@ -24,10 +24,10 @@ Smoke results on real hardware (two PCs, direct audio cable, BW500), all with
 alpha.3: Mercury 1.9.19 8/8 pairs passed, VARA HF 4.9.0 unlicensed 8/8, VARA HF
 4.9.0 licensed 8/8 (details in docs/protocol_compatibility.md). These validate the
 installation, wiring and control of each arm; they are not performance results.
-Those runs did not yet include E0-3. alpha.4 adds the same-session ACK (E0-3) to the
-common client and a bench calibration with the bench's own signal; both still have to
-be run on the real bench. The channel simulator and performance results are not
-implemented yet.
+With alpha.4 (protocol v5.2) the complete profile, including the same-session ACK
+(E0-3), passed 9/9 for each arm on 2026-10-23, and the bench calibration measured
+SNR 74/77 dB and SINAD 71/74 dB on the two audio paths. The channel simulator and
+performance results are not implemented yet.
 
 The historical v0.1.0 release remains unchanged. It used the earlier Mercury
 plus Pat scope and is superseded for new work.
