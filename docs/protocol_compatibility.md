@@ -30,7 +30,15 @@ Mercury evidence: smoke test of 2026-10-22 (protocol 5.0, profile MS-1.0, app
 Mercury again with app 0.2.0-alpha.3 (protocol 5.1) on 2026-10-23 01:15–01:31 UTC,
 as one full sequence per PC: 8 pairs passed, no unpaired or crossed runs, `LISTEN OFF`
 → `OK` after every receiver run. Mercury stayed at `BITRATE (3) 321 BPS`; 10 KiB took
-388 s at the sender. Mercury reported SN about 25 dB at PC A and 10–13 dB at PC B.
+388 s at the sender.
+
+Mercury's `SN` is the estimate of the mode that decoded each frame, not a channel
+measurement. On the clean cable the receiver reports 25.0 dB (an estimator ceiling)
+for call and disconnect frames and 9–13 dB for mode 3 data frames; a sender only
+receives control and ACK frames and always reports about 25 dB. Swapping the RCA
+cables changed nothing, and swapping the roles of the two PCs (2026-10-23 02:55 UTC,
+H1-1) moved the 11–12 dB readings to the PC that received the data. `SN` is therefore
+not used to calibrate the bench.
 
 VARA evidence: smoke test of 2026-10-22, VARA HF 4.9.0 unlicensed on both PCs
 (VARA.exe SHA-256 c69b8c81…f00486f), app 0.2.0-alpha.3, protocol 5.1: E0-1 (16 B,
