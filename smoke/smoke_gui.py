@@ -392,7 +392,7 @@ class ModemSmokeWindow(tk.Tk):
             return
         if sequence:
             order = (" Start PC B first. PC A waits "
-                     f"{logic.SEQUENCE_GAP_S} s between tests." if self.values["role"].get() == "A"
+                     f"{logic.SEQUENCE_GAP_S} s between tests ({logic.SEQUENCE_GAP_S + 60} s after E0-3)." if self.values["role"].get() == "A"
                      else " Start PC B first; it re-arms after each test.")
         self.selected_label.configure(
             text=f"This PC will run: {logic.test_tag(name, repetition)} as {role} with {modem}. "
