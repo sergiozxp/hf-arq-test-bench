@@ -12,12 +12,33 @@ on:
         description: "Publish a release with this tag (for example v0.2.0-alpha.3). Leave empty to only build."
         required: false
         default: ""
+      notes_tag:
+        description: "Only replace the notes of this existing release with docs/releases/<tag>.md."
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
+  notes:
+    if: github.event_name == 'workflow_dispatch' && inputs.notes_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.notes_tag }}
+        run: |
+          set -eu
+          test -f "docs/releases/$TAG.md" || { echo "docs/releases/$TAG.md not found"; exit 1; }
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "docs/releases/$TAG.md"
+
   test:
+    if: github.event_name != 'workflow_dispatch' || inputs.notes_tag == ''
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +119,7 @@ jobs:
              git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
             echo "Tag $TAG already exists"; exit 1
           fi
+          if [ -f "docs/releases/$TAG.md" ]; then echo "NOTES=docs/releases/$TAG.md" >> "$GITHUB_ENV"; else echo "NOTES=" >> "$GITHUB_ENV"; fi
           case "$TAG" in *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV";; *) echo "PRERELEASE=false" >> "$GITHUB_ENV";; esac
       - uses: actions/download-artifact@v4
         with:
@@ -109,7 +131,8 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: ${{ env.TAG }}
           prerelease: ${{ env.PRERELEASE }}
-          generate_release_notes: true
+          body_path: ${{ env.NOTES }}
+          generate_release_notes: ${{ env.NOTES == '' }}
           files: |
             release/HF-ARQ-Modem-Smoke.exe
             release/SHA256SUMS.txt
