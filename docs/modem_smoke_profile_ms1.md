@@ -1,6 +1,6 @@
 # Modem Smoke Profile MS-1.0
 
-Governing protocol: HF-ARQ Modem Benchmark Protocol v5.1.
+Governing protocol: HF-ARQ Modem Benchmark Protocol v5.2.
 
 MS-1.0 is a preflight profile, not a performance measurement. It covers
 Mercury 1.9.19 and, from 0.2.0-alpha.3, VARA HF 4.9.0 (unlicensed and
@@ -31,9 +31,11 @@ ports to all interfaces, both PCs are kept off the network during the test.
 | E0-3 | Same-session ACK | B validates, sends ACK, and A verifies before disconnect |
 | H1 | Three independent 200 B transfers | Hash at B and complete archived evidence |
 
-E0-3 is specified for the common client but is not yet exposed by the alpha
-GUI. The 0.2.0-alpha.3 executable exposes E0-1, E0-2 V1 and V2, and H1, for both
-modems.
+From 0.2.0-alpha.4 the executable exposes every test, for both modems: E0-1,
+E0-2 V1 and V2, E0-3 and H1. In E0-3 (200 B) B writes `ACK run=<12-hex>
+SHA256=<16-hex>` on the data port of the same session and A reads and checks it
+before DISCONNECT; the pair passes only when A verified the ACK. A smoke test that
+includes E0-3 is complete; earlier runs without E0-3 are partial.
 
 E0-2 V3 ("receiver listens first") was withdrawn in 0.2.0-alpha.2. Every test
 already starts the receiver first, so V3 executed the same steps as V1 and
@@ -43,7 +45,8 @@ not listening) may be specified later as a new variant.
 H1 is run three times, with repetition numbers 1, 2 and 3 on both PCs.
 
 From 0.2.0-alpha.3 the GUI can run the whole sequence with one RUN per PC
-(`smoke_sequence.py`): E0-1 16 B, 1 KiB, 10 KiB, E0-2 V1, V2, H1-1, H1-2, H1-3. The
+(`smoke_sequence.py`): E0-1 16 B, 1 KiB, 10 KiB, E0-2 V1, V2, E0-3 (from alpha.4),
+H1-1, H1-2, H1-3. The
 PCs share no network, so each follows the same fixed order: the receiver listens
 again as soon as a test ends, and the sender waits a fixed gap (45 s) before each
 following test. Each PC stops at its first failure, and the session cross-check
@@ -96,6 +99,14 @@ callsigns. On 2026-10-22 an E0-2 V2 sender and an H1-1 receiver that ran at the 
 time cross-checked as passed with alpha.2, because both send the same 200 bytes;
 alpha.3 rejects such a pair as "invalid_pair". The session cross-check pairs all runs
 of the two PCs by tag and start time and lists unpaired and crossed runs.
+
+## Bench calibration (from 0.2.0-alpha.4)
+
+Before the smoke sequence, with the modems stopped, the "CAL" test measures both
+audio paths with the bench's own signal (protocol v5.2): SNR, SINAD, tone level,
+clipping and clock offset. It runs PC B first (records A->B, then plays) and PC A
+5–30 s later (plays, then records B->A). Records and recordings are archived in
+`results/calibration/`, and the session report shows the latest of each path.
 
 ## Evidence
 

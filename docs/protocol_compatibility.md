@@ -21,6 +21,7 @@ Status legend: **confirmed** = observed with the real modem and archived evidenc
 | ARQ event | `BUFFER n`; `BUFFER 0` also appears before any data is written (confirmed) | `BUFFER 0` after the write (confirmed); no `BUFFER 0` before the write was seen | Only a BUFFER 0 after the write counts; never delivery proof |
 | Link reports | `SN <dB>`, `BITRATE (<mode>) <bps> BPS`, `PTT ON/OFF` (confirmed) | `BITRATE (<level>)  <bps> bps TX/RX` (two spaces), `SN <dB>` on the receiver only, `PTT ON/OFF`, `BUSY ON/OFF`, `IAMALIVE`, `ENCRYPTION DISABLED`, `UNENCRYPTED LINK`, `LINK UNREGISTERED` / `LINK REGISTERED` (confirmed) | Recorded in link_stats (level, link mode, busy events) |
 | Sound card failure | status `audio_ok=false` on the UI WebSocket (documented, source) | `MISSING SOUNDCARD` (documented, 4.5.5) | Infrastructure fault, not a modem failure |
+| Same-session ACK (E0-3) | B writes the ACK line on 8301 while connected; A reads it on 8301 before `DISCONNECT` (to verify, alpha.4) | Same (to verify, alpha.4) | A verifies before disconnect |
 | Disconnect | `DISCONNECT` → `OK`, `DISCONNECTED` (confirmed) | `DISCONNECT` → `OK`, `DISCONNECTED` (confirmed) | End every attempt disconnected |
 | Command replies | `OK` / `WRONG` (confirmed) | `OK` (confirmed); a missing reply is a failure from 0.2.0-alpha.3 on | Recorded per command |
 

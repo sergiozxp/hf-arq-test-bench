@@ -116,6 +116,11 @@ def main() -> int:
         encoding="utf-8", errors="replace", timeout=120,
     )
     check(help_result.returncode == 2 and len(help_result.stdout) > 20, "launcher returns script help")
+    for script in ("bench_calibration.py", "smoke_sequence.py"):
+        usage = subprocess.run(launcher + [script], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=120)
+        check(usage.returncode == 2 and "usage" in (usage.stdout + usage.stderr).lower(),
+              f"launcher runs {script}")
     missing_result = subprocess.run(
         launcher + ["missing_script.py"], capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=120,

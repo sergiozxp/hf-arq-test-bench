@@ -1,11 +1,11 @@
 # Windows Modem Smoke Guide
 
-This guide runs MS-1.0 with HF-ARQ Modem Smoke 0.2.0-alpha.3 against real
+This guide runs MS-1.0 with HF-ARQ Modem Smoke 0.2.0-alpha.4 against real
 Mercury 1.9.19 and VARA HF 4.9.0 installations. It does not produce benchmark
 results and it does not require Pat, VarAC, a radio, PTT, or CAT control.
 
-This alpha covers E0-1, E0-2 and H1. E0-3 (same-session ACK) is specified in
-MS-1.0 but is not available yet, so a smoke test run with this alpha is partial.
+This alpha covers every MS-1.0 test: E0-1, E0-2, E0-3 (same-session ACK) and H1,
+plus the bench calibration. A smoke test that includes E0-3 is complete.
 
 ## What you need
 
@@ -95,15 +95,36 @@ and `session.json`. Each test also gets a `level_summary.json`.
 On VARA, every test also sends `VERSION`, `P2P SESSION` and `CHAT OFF` after
 `MYCALL` (protocol v5.1).
 
-## 5. Run the tests
+## 5. Calibrate the bench (once per session)
+
+The calibration measures both audio paths with the bench's own signal. Mercury's
+"SN" cannot be used for this: it reads about 25 dB for control frames and about
+11 dB for data frames on the same clean cable.
+
+1. Stop the modem on both PCs (Stop Mercury; close VARA). Keep the Windows levels
+   as they will be used (playback 100, recording 54 on this bench).
+2. On both PCs choose **Test: "CAL  Bench calibration: both audio paths"**. With
+   VARA selected, press Check VARA first so the GUI knows the interface.
+3. Press **RUN on PC B**. It shows "recording 45 s".
+4. Between 5 and 30 s later press **RUN on PC A**. PC A plays a 14 s test signal,
+   then records 60 s while PC B plays it back.
+5. Each PC shows the path it received: PC B "CALIBRATION A->B", PC A
+   "CALIBRATION B->A", with SNR, SINAD, tone level and clock offset, and the highest
+   simulated SNR that path supports. Green means usable; orange lists what to fix
+   (clipping: lower the recording level; low SNR or SINAD: check cable and levels).
+
+The record and the recording are saved in `results\calibration\`. Then start the
+modem again and run the tests.
+
+## 6. Run the tests
 
 ### Recommended: the full sequence
 
-1. On both PCs leave **Test** on "ALL  Full sequence: the 8 tests in order" and
+1. On both PCs leave **Test** on "ALL  Full sequence: the 9 tests in order" and
    **Start at step** on 1. The blue line lists the tests this PC will run.
 2. Press **RUN** on **PC B**. Wait until it shows `waiting_for_connection`.
 3. Press **RUN** on **PC A**.
-4. Leave both PCs alone. The blue line shows "Now: Test n of 8". PC B starts
+4. Leave both PCs alone. The blue line shows "Now: Test n of 9". PC B starts
    listening for the next test as soon as one ends; PC A waits 45 s between tests,
    so that PC B is listening again before the next CONNECT. Each test still gets
    its own result folder and result line.
@@ -116,7 +137,9 @@ or the sender's connect timeout). Keep both results. To finish the remaining tes
 choose the step after the last passed test in **Start at step** on both PCs, then
 RUN on PC B first and PC A second. **Stop** ends the whole sequence on that PC.
 
-Order: E0-1 (16 B, 1 KiB, 10 KiB), E0-2 V1 and V2, then H1 repetitions 1, 2, 3.
+Order: E0-1 (16 B, 1 KiB, 10 KiB), E0-2 V1 and V2, E0-3, then H1 repetitions 1, 2, 3.
+In E0-3, PC B sends an ACK back in the same session and PC A checks it before
+disconnecting; on free VARA (88 bps) it takes noticeably longer than H1.
 
 ### One test at a time
 
@@ -131,7 +154,7 @@ Order: E0-1 (16 B, 1 KiB, 10 KiB), E0-2 V1 and V2, then H1 repetitions 1, 2, 3.
 For H1, use repetition 1, 2, 3 (the same number on both PCs). Keep the modem
 running between tests.
 
-## 6. Cross-check the session
+## 7. Cross-check the session
 
 1. On PC B, press **Create results ZIP** and carry the ZIP to PC A.
 2. On PC A, press **Cross-check with the other PC's ZIP…** and choose that ZIP.
@@ -140,16 +163,19 @@ running between tests.
    started closest in time, and cross-checks each pair. A pair of two different
    tests is rejected even if the hashes match. Runs without a partner and crossed
    runs (the PCs ran different tests at the same time) are listed.
-4. The report is saved in `results\cross_checks\<time>\` as
+4. The report also lists runs stopped before they wrote a result, and the latest
+   calibration of each path.
+5. The report is saved in `results\cross_checks\<time>\` as
    `cross_check_report.json` and `cross_check_report.csv`.
 
 **Cross-check two result files…** still compares one pair chosen by hand.
 
-## 7. Finish
+## 8. Finish
 
 1. Stop the modem on both PCs (Stop Mercury, or close VARA).
 2. Use **Create results ZIP** on both PCs and keep both archives.
-3. Record the smoke test as partial: E0-3 is pending.
+3. Keep the calibration records with the results: they state the usable SNR range
+   of the bench for the simulated channel.
 
 ## If something fails
 

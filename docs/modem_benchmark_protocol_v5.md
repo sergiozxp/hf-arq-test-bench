@@ -1,4 +1,4 @@
-# HF-ARQ Modem Benchmark Protocol v5.1
+# HF-ARQ Modem Benchmark Protocol v5.2
 
 ## Objective and scope
 
@@ -44,16 +44,21 @@ as not_applicable with its reason.
 
 1. A requests a fresh ARQ connection and sends one framed payload.
 2. B validates length and SHA-256 and writes ACK run=<12-hex>
-   SHA256=<first-16-hex>.
+   SHA256=<first-16-hex> followed by a line feed.
 3. B writes that ACK in the same open ARQ session.
 4. A verifies the ACK before requesting disconnect.
+
+run is the first 12 hexadecimal digits of the SHA-256 of the 16-byte frame header
+(length and truncated hash), so the ACK names the exact frame it confirms; SHA256 is
+the first 16 hexadecimal digits of the payload's SHA-256 (v5.2). A records the ACK
+line and the time from the end of its write to the ACK (ack_round_trip_s).
 
 BUFFER 0 or another native ARQ event is recorded but never treated as delivery.
 The direct bidirectional ACK must be verified for every adapter before Phase 1.
 
 ## Raw attempt record
 
-Every raw record includes protocol_version (5.1), run_id, UTC start, arm,
+Every raw record includes protocol_version (5.2), run_id, UTC start, arm,
 condition, load, trace/seed, modem binary hash, outcome, times, payload hashes,
 ACK fields, and failure reason. Outcome is success, failure, or interrupted.
 An interrupted attempt is retained and its replacement uses the paired trace.
@@ -100,6 +105,35 @@ intervals for median and p90; and Kaplan-Meier median only when success exceeds
 - When Mercury is started by the bench, its status (TX peak in dBFS, received SNR,
   sound card state) is logged twice per second and summarised per attempt. The TX peak
   is Mercury's digital output level; the analog level is checked at the receiving PC.
+
+## Bench calibration (added in v5.2)
+
+Before each measurement campaign, with both modems stopped, the bench measures each
+audio path with its own signal, not with a modem's SNR report (Mercury's SN is the
+estimate of the mode that decoded a frame and reads about 25 dB for control frames
+and about 11 dB for data frames on the same clean cable).
+
+- Signal: 4 s of digital silence, 6 s of a 1500 Hz tone at -6 dBFS peak (the TX
+  peak both modems use on this bench), 4 s of silence; 48 kHz, 16 bit, the same on
+  both channels, through the Windows audio engine at the bench's Windows levels.
+- One PC plays and the other records; PC B records first, then plays, so one run
+  per PC measures A->B and B->A.
+- Measured per channel: tone level, noise floor and SNR (broadband, 0-24 kHz, so
+  conservative for a 3 kHz modem), SINAD from a least-squares tone fit at the
+  measured frequency, clipped samples, DC offset and clock offset in ppm.
+- A path is usable when the left channel (the one both modems use) has SNR >= 40 dB,
+  SINAD >= 35 dB and no clipping. The simulated channel is used only at SNRs at
+  least 10 dB below the lower of the two values on the path that carries the data.
+- Each record and its recording are archived; the session report shows the latest
+  calibration of each path.
+
+## Changes from v5.1
+
+- The ACK fields are defined (run from the frame header, line feed terminator), and
+  E0-3 (same-session ACK) is part of the smoke profile.
+- Bench calibration with the bench's own signal.
+- A receiver sends LISTEN OFF at the end of every attempt; a session that began
+  before the receiver listened is a procedure fault, not a modem failure.
 
 ## Changes from v5.0
 

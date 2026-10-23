@@ -14,7 +14,7 @@ message-workflow behaviour.
 
 ## Status
 
-This is v0.2.0-alpha.3. The smoke GUI runs profile MS-1.0 (E0-1, E0-2, H1) against
+This is v0.2.0-alpha.4. The smoke GUI runs profile MS-1.0 (E0-1, E0-2, E0-3, H1) against
 Mercury 1.9.19, which it starts from the verified official ZIP, and against VARA
 HF 4.9.0, which the operator opens. It shows Mercury's live levels, checks which
 program owns ports 8300 and 8301 before every test, and cross-checks a whole
@@ -24,11 +24,24 @@ Smoke results on real hardware (two PCs, direct audio cable, BW500), all with
 alpha.3: Mercury 1.9.19 8/8 pairs passed, VARA HF 4.9.0 unlicensed 8/8, VARA HF
 4.9.0 licensed 8/8 (details in docs/protocol_compatibility.md). These validate the
 installation, wiring and control of each arm; they are not performance results.
-The same-session ACK (E0-3), the common benchmark client, the channel simulator and
-performance results are not implemented yet, so the smoke profile is partial.
+Those runs did not yet include E0-3. alpha.4 adds the same-session ACK (E0-3) to the
+common client and a bench calibration with the bench's own signal; both still have to
+be run on the real bench. The channel simulator and performance results are not
+implemented yet.
 
 The historical v0.1.0 release remains unchanged. It used the earlier Mercury
 plus Pat scope and is superseded for new work.
+
+### Changes in 0.2.0-alpha.4
+
+- E0-3: B writes `ACK run=<12-hex> SHA256=<16-hex>` in the same open session and A
+  verifies it before DISCONNECT; the cross-check requires it. The full sequence has
+  9 tests.
+- Bench calibration ("CAL" test): with the modems stopped, both audio paths are
+  measured with a known signal (SNR, SINAD, level, clipping, clock offset), and the
+  usable simulated SNR range is recorded.
+- The session report lists stopped runs and the latest calibration of each path.
+- Protocol v5.2.
 
 ### Changes in 0.2.0-alpha.3
 
