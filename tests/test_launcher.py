@@ -242,7 +242,7 @@ def main() -> int:
             time.sleep(0.5)
         check(any("waiting_for_connection" in l for l in seq_lines), "sequence receiver is listening")
         seq_sender = subprocess.run(
-            launcher + ["smoke_sequence.py", "send", "--config", str(seq_configs["A"]), "--gap-s", "4"],
+            launcher + ["smoke_sequence.py", "send", "--config", str(seq_configs["A"]), "--gap-s", "4", "--ack-extra-s", "3"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
         )
         receiver.wait(timeout=300)

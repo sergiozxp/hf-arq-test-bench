@@ -125,7 +125,7 @@ modem again and run the tests.
 2. Press **RUN** on **PC B**. Wait until it shows `waiting_for_connection`.
 3. Press **RUN** on **PC A**.
 4. Leave both PCs alone. The blue line shows "Now: Test n of 9". PC B starts
-   listening for the next test as soon as one ends; PC A waits 45 s between tests,
+   listening for the next test as soon as one ends; PC A waits 45 s between tests (105 s after E0-3),
    so that PC B is listening again before the next CONNECT. Each test still gets
    its own result folder and result line.
 5. At the end each PC shows "SEQUENCE COMPLETED" and writes a record to

@@ -21,7 +21,7 @@ Status legend: **confirmed** = observed with the real modem and archived evidenc
 | ARQ event | `BUFFER n`; `BUFFER 0` also appears before any data is written (confirmed) | `BUFFER 0` after the write (confirmed); no `BUFFER 0` before the write was seen | Only a BUFFER 0 after the write counts; never delivery proof |
 | Link reports | `SN <dB>`, `BITRATE (<mode>) <bps> BPS`, `PTT ON/OFF` (confirmed) | `BITRATE (<level>)  <bps> bps TX/RX` (two spaces), `SN <dB>` on the receiver only, `PTT ON/OFF`, `BUSY ON/OFF`, `IAMALIVE`, `ENCRYPTION DISABLED`, `UNENCRYPTED LINK`, `LINK UNREGISTERED` / `LINK REGISTERED` (confirmed) | Recorded in link_stats (level, link mode, busy events) |
 | Sound card failure | status `audio_ok=false` on the UI WebSocket (documented, source) | `MISSING SOUNDCARD` (documented, 4.5.5) | Infrastructure fault, not a modem failure |
-| Same-session ACK (E0-3) | B writes the ACK line on 8301 while connected; A reads it on 8301 before `DISCONNECT` (to verify, alpha.4) | Same (to verify, alpha.4) | A verifies before disconnect |
+| Same-session ACK (E0-3) | B writes the 45-byte ACK line on 8301 while connected; A reads it and checks it before `DISCONNECT` (confirmed 2026-10-23: round trip 31.5 s from A's write, B's own `BUFFER 0` 18.7 s after its write). A disconnects before B's ACK frame is confirmed, and B reports `DISCONNECTED` 41 s after A's `DISCONNECT` (about 10 s in the other tests) | Same (to verify, alpha.4) | A verifies before disconnect |
 | Disconnect | `DISCONNECT` → `OK`, `DISCONNECTED` (confirmed) | `DISCONNECT` → `OK`, `DISCONNECTED` (confirmed) | End every attempt disconnected |
 | Command replies | `OK` / `WRONG` (confirmed) | `OK` (confirmed); a missing reply is a failure from 0.2.0-alpha.3 on | Recorded per command |
 
@@ -40,6 +40,10 @@ receives control and ACK frames and always reports about 25 dB. Swapping the RCA
 cables changed nothing, and swapping the roles of the two PCs (2026-10-23 02:55 UTC,
 H1-1) moved the 11–12 dB readings to the PC that received the data. `SN` is therefore
 not used to calibrate the bench.
+
+Mercury full sequence with app 0.2.0-alpha.4 (protocol 5.2) on 2026-10-23
+04:05–04:23 UTC: 9 of 9 pairs passed, E0-3 included, no unpaired, crossed or
+stopped runs.
 
 Bench calibration with the bench's own signal (app 0.2.0-alpha.4, 2026-10-23 03:54 UTC,
 clean cable, Windows levels 100/54, left channel): A->B SNR 74.1 dB, SINAD 71.2 dB;

@@ -11,8 +11,8 @@ HOW THE TWO PCs STAY IN STEP
   The PCs share no network during the test, so each follows the same fixed script.
   The receiver starts listening for the next test as soon as one ends (each listen
   waits up to listen_timeout_s). The sender waits --gap-s seconds (default 45) after
-  each test, so that the receiver has finished its bookkeeping and is listening
-  again before the next CONNECT. Each PC stops at its first failure; the session
+  each test (60 s more after E0-3), so that the receiver has finished its bookkeeping
+  and is listening again before the next CONNECT. Each PC stops at its first failure; the session
   cross-check rejects any pair of different tests, so a desynchronised step can
   never be counted as a pass.
 """
@@ -30,6 +30,12 @@ import smoke_gui_logic as logic
 from smoke_common import load_config
 
 DEFAULT_GAP_S = 45
+# After a same-session ACK test the receiver ends later: the sender disconnects as soon
+# as it has read the ACK, before the receiver's modem has had its own ACK frame
+# confirmed, and the receiver then waits for the session to time out. Mercury 1.9.19
+# reported DISCONNECTED to PC B 41 s after PC A's DISCONNECT (about 10 s otherwise),
+# so the sender waits this much longer before the next test.
+ACK_EXTRA_GAP_S = 60
 
 
 def steps() -> list[tuple[str, int]]:
@@ -58,6 +64,8 @@ def main() -> int:
     ap.add_argument("--from", dest="start", type=int, default=1, help="first step (1-9)")
     ap.add_argument("--gap-s", type=float, default=DEFAULT_GAP_S,
                     help="sender only: seconds to wait between tests")
+    ap.add_argument("--ack-extra-s", type=float, default=ACK_EXTRA_GAP_S,
+                    help="sender only: extra seconds to wait after a same-session ACK test")
     args = ap.parse_args()
     plan = steps()
     if not 1 <= args.start <= len(plan):
@@ -74,8 +82,10 @@ def main() -> int:
             continue
         tag = logic.test_tag(name, repetition)
         if args.mode == "send" and number > args.start:
-            print(f"\nWaiting {args.gap_s:.0f} s so that PC B is listening for {tag}…", flush=True)
-            time.sleep(args.gap_s)
+            previous = logic.MERCURY_TESTS[plan[number - 2][0]]
+            wait = args.gap_s + (args.ack_extra_s if previous.get("ack") else 0)
+            print(f"\nWaiting {wait:.0f} s so that PC B is listening for {tag}…", flush=True)
+            time.sleep(wait)
         print(f"\n=== STEP {number}/{len(plan)}: {tag} ({'SENDER' if args.mode == 'send' else 'RECEIVER'}) ===",
               flush=True)
         t0 = time.monotonic()
