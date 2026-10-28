@@ -96,6 +96,7 @@ jobs:
           path: |
             dist/HF-ARQ-Modem-Smoke.exe
             dist/SHA256SUMS.txt
+          retention-days: 7
 
   release:
     # A pushed tag, or "Run workflow" on main with a release tag.
