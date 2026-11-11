@@ -64,6 +64,16 @@ outside ±1 dB is not counted.
 To resume a stopped cell, use the next attempt number in all three places (PC A,
 PC B and the simulator's first attempt).
 
+## Order of work
+
+1. Bench validation: CAL through the simulator, the 9-test sequence in Transparent
+   for Mercury, VARA free and VARA licensed (VARA Drive set for equal peaks), then the
+   kit (Moderate, 200 B, 10 attempts) for the three arms.
+2. Pilot (exploratory): "PILOT  Good, 200 B, 10 attempts" and "PILOT  Poor, …" for the
+   three arms; the kit covers Moderate. If a condition is 0 % or 100 % for all three
+   arms, its SNR is changed once, with the reason recorded.
+3. Campaign: the six "P1" cells of 30 attempts for each arm.
+
 ## What is not counted
 
 An attempt is not counted, and is repeated later with the same attempt number, when

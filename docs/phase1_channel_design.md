@@ -126,7 +126,10 @@ same-session ACK (E0-3 procedure).
 - **Campaign:** 3 arms x 3 conditions x 2 loads = 18 cells of 30 attempts (540).
   Run one arm at a time, condition by condition, both loads.
 - **Minimum replication kit:** CAL plus 200 B in the moderate condition, 10 attempts
-  per arm. It confirms that another station can reproduce the bench and obtain
+  per arm. For this bench it is also the moderate part of the pilot.
+- **Series.** Kit (`KIT-…`), pilot (`PILOT-…`, good and poor, 200 B, 10 attempts) and
+  campaign (`P1-…`) use the same seeds for attempt k but separate tags, so they are
+  reported apart and never mixed. It confirms that another station can reproduce the bench and obtain
   compatible results; it is not a validation of the whole study.
 
 ## 7. Report

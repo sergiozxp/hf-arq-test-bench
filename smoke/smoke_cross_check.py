@@ -38,7 +38,7 @@ RUN_DIR_RE = re.compile(r"^(?P<tag>.+)_(?P<start>\d{8}T\d{6}Z)_(?P<rid>[0-9a-f]{
 # sender start minus receiver start). The negative margin absorbs clock offset.
 PAIR_WINDOW_S = (-120, 600)
 CROSSED_WINDOW_S = 120
-P1_TAG_RE = re.compile(r"^P1-(?P<condition>[a-z]+)-(?P<load>[0-9A-Za-z]+)-(?P<attempt>\d+)$")
+P1_TAG_RE = re.compile(r"^(?P<series>P1|KIT|PILOT)-(?P<condition>[a-z]+)-(?P<load>[0-9A-Za-z]+)-(?P<attempt>\d+)$")
 # The simulator runs on PC B, so its attempts are matched against PC B's runs (same clock):
 # attempt k starts on PC A's first audio, after PC B's run k started listening.
 SIM_EARLY_S = 0
@@ -276,7 +276,7 @@ def attach_simulator(row: dict, sender: dict, receiver: dict, sim_attempts: list
     if not match:
         return
     condition, attempt = match.group("condition"), int(match.group("attempt"))
-    row.update(condition=condition, load=match.group("load"), attempt=attempt,
+    row.update(series=match.group("series"), condition=condition, load=match.group("load"), attempt=attempt,
                delivery_time_s=sender["result"].get("delivery_time_s"),
                deadline_reached=bool(sender["result"].get("deadline_reached")))
     limit = (sender["result"].get("deadline_s") or 3600) + 300
@@ -306,8 +306,9 @@ def cell_table(rows: list[dict]) -> list[dict]:
     for row in rows:
         if "condition" not in row:
             continue
-        key = (row.get("arm"), row["condition"], row["load"])
-        cell = cells.setdefault(key, {"arm": key[0], "condition": key[1], "load": key[2], "attempts": 0,
+        key = (row.get("series", "P1"), row.get("arm"), row["condition"], row["load"])
+        cell = cells.setdefault(key, {"series": key[0], "arm": key[1], "condition": key[2], "load": key[3],
+                                      "attempts": 0,
                                       "counted": 0, "successes": 0, "failures": 0, "deadline_reached": 0,
                                       "not_counted": [], "times": []})
         cell["attempts"] += 1
@@ -330,7 +331,7 @@ def cell_table(rows: list[dict]) -> list[dict]:
         cell.update(success_rate=round(cell["successes"] / cell["counted"], 4) if cell["counted"] else None,
                     wilson_95=[low, high], median_delivery_s=None if not times else round(median(times), 1))
         out.append(cell)
-    return sorted(out, key=lambda c: (str(c["arm"]), c["condition"], c["load"]))
+    return sorted(out, key=lambda c: (c["series"], str(c["arm"]), c["condition"], c["load"]))
 
 
 def pair_runs(runs: list[dict]) -> tuple[list[tuple[dict, dict]], list[dict], list[dict]]:
@@ -417,11 +418,11 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
     if report["cells"]:
         with open(out_dir / "phase1_cells.csv", "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle, delimiter=";")
-            writer.writerow(["arm", "condition", "load", "attempts", "counted", "successes", "failures",
+            writer.writerow(["series", "arm", "condition", "load", "attempts", "counted", "successes", "failures",
                              "deadline_reached", "success_rate", "wilson_low", "wilson_high",
                              "median_delivery_s", "not_counted"])
             for c in report["cells"]:
-                writer.writerow([c["arm"], c["condition"], c["load"], c["attempts"], c["counted"],
+                writer.writerow([c["series"], c["arm"], c["condition"], c["load"], c["attempts"], c["counted"],
                                  c["successes"], c["failures"], c["deadline_reached"], c["success_rate"],
                                  c["wilson_95"][0], c["wilson_95"][1], c["median_delivery_s"],
                                  len(c["not_counted"])])

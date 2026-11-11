@@ -200,12 +200,17 @@ CAMPAIGN_LOADS = {"200B": 200, "10KiB": 10240}
 CAMPAIGN_DEADLINE_S = {"200B": 600, "10KiB": 3600}
 CAMPAIGN_LOAD_LABELS = {"200B": "200 B", "10KiB": "10 KiB"}
 CAMPAIGN_CONDITIONS = {"good": "Good", "moderate": "Moderate", "poor": "Poor"}
+# Three series with the same seeds for attempt k, kept apart by their tag prefix so that
+# the kit and the pilot never mix with the campaign cells in a report.
 KIT_TEST = "KIT  Minimum replication kit: Moderate, 200 B, 10 attempts"
-CAMPAIGN_TESTS = {KIT_TEST: dict(condition="moderate", load="200B", attempts=10)}
+CAMPAIGN_TESTS = {KIT_TEST: dict(series="KIT", condition="moderate", load="200B", attempts=10)}
+for _cond, _label in (("good", "Good"), ("poor", "Poor")):
+    CAMPAIGN_TESTS[f"PILOT  {_label}, 200 B, 10 attempts (exploratory)"] = dict(
+        series="PILOT", condition=_cond, load="200B", attempts=10)
 for _cond, _label in CAMPAIGN_CONDITIONS.items():
     for _load in CAMPAIGN_LOADS:
         CAMPAIGN_TESTS[f"P1  {_label}, {CAMPAIGN_LOAD_LABELS[_load]}, 30 attempts"] = dict(
-            condition=_cond, load=_load, attempts=30)
+            series="P1", condition=_cond, load=_load, attempts=30)
 CAMPAIGN_GAP_S = SEQUENCE_GAP_S + 60     # every attempt ends with the same-session ACK
 
 TEST_CHOICES = [SEQUENCE_TEST, CALIBRATION_TEST, *CAMPAIGN_TESTS, *MERCURY_TESTS]
@@ -222,15 +227,15 @@ def is_campaign(test_name: str) -> bool:
     return test_name in CAMPAIGN_TESTS
 
 
-def campaign_tag(condition: str, load: str, attempt: int) -> str:
-    return f"P1-{condition}-{load}-{attempt:02d}"
+def campaign_tag(condition: str, load: str, attempt: int, series: str = "P1") -> str:
+    return f"{series}-{condition}-{load}-{attempt:02d}"
 
 
 def campaign_commands(role: str, test_name: str, start: int = 1) -> list[list[str]]:
     cell = CAMPAIGN_TESTS[test_name]
     mode = "send" if role == "A" else "listen"
     command = ["smoke_sequence.py", mode, "--campaign", cell["condition"], "--load", cell["load"],
-               "--attempts", str(cell["attempts"]), "--from", str(start)]
+               "--attempts", str(cell["attempts"]), "--series", cell["series"], "--from", str(start)]
     if mode == "send":
         command += ["--gap-s", f"{SEQUENCE_GAP_S:g}"]
     return [command]
@@ -255,7 +260,7 @@ def test_tag(test_name: str, repetition: int) -> str:
         return "the bench calibration"
     if is_campaign(test_name):
         cell = CAMPAIGN_TESTS[test_name]
-        return (f"the Phase 1 cell {campaign_tag(cell['condition'], cell['load'], repetition)[:-3]}, "
+        return (f"the Phase 1 cell {campaign_tag(cell['condition'], cell['load'], repetition, cell['series'])[:-3]}, "
                 f"attempts {repetition}–{cell['attempts']}")
     preset = MERCURY_TESTS[test_name]
     return preset["tag"].replace("{n}", str(repetition))
@@ -373,7 +378,7 @@ def summarize_sequence(report: dict) -> tuple[str, str]:
     done, planned = report.get("completed_steps", 0), report.get("planned_steps", 0)
     cell = report.get("campaign")
     if cell:
-        return (f"CELL {cell['condition']} {cell['load']} FINISHED ({side}): {len(report.get('steps') or [])} "
+        return (f"CELL {cell.get('series', 'P1')} {cell['condition']} {cell['load']} FINISHED ({side}): {len(report.get('steps') or [])} "
                 f"attempt(s) run. Successes and failures are counted by the cross-check with the other PC's "
                 f"ZIP.", "orange")
     if report.get("outcome") == "completed":
@@ -401,7 +406,8 @@ def summarize_report(report: dict) -> tuple[str, str]:
             interval = "" if low is None else f" (95 % {low * 100:.0f}–{high * 100:.0f} %)"
             med = "" if c["median_delivery_s"] is None else f", median {c['median_delivery_s']:.0f} s"
             extra = f", {len(c['not_counted'])} not counted" if c["not_counted"] else ""
-            lines.append(f"{c['arm']} · {c['condition']} · {c['load']}: {c['successes']}/{c['counted']} = "
+            lines.append(f"{c.get('series', 'P1')} · {c['arm']} · {c['condition']} · {c['load']}: "
+                         f"{c['successes']}/{c['counted']} = "
                          f"{rate}{interval}{med}{extra}")
         text = "PHASE 1 CELLS: " + "; ".join(lines)
         if report.get("crossed_runs") or report.get("unpaired"):

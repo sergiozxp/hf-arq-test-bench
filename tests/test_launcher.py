@@ -281,7 +281,7 @@ def main() -> int:
             path.write_text(CONFIG.format(results=temporary / f"results_C{local}", command_port=command_port,
                                           data_port=data_port, local=local, peer=peer), encoding="utf-8")
             cell_configs[local] = path
-        cell_args = ["--campaign", "moderate", "--load", "200B", "--attempts", "3"]
+        cell_args = ["--campaign", "moderate", "--load", "200B", "--attempts", "3", "--series", "KIT"]
         receiver = subprocess.Popen(
             launcher + ["smoke_sequence.py", "listen", "--config", str(cell_configs["B"]), *cell_args],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
@@ -300,7 +300,7 @@ def main() -> int:
         receiver.wait(timeout=300)
         reader.join(timeout=10)
         check("CELL FINISHED" in cell_sender.stdout and receiver.returncode == 0, "a Phase 1 cell runs 3 attempts")
-        a_runs = sorted(glob.glob(str(temporary / "results_CA" / "p1" / "P1-moderate-200B-*" / "result.json")))
+        a_runs = sorted(glob.glob(str(temporary / "results_CA" / "p1" / "KIT-moderate-200B-*" / "result.json")))
         check(len(a_runs) == 3, "three attempts are recorded under p1/")
         first = json.loads(Path(a_runs[0]).read_text(encoding="utf-8"))
         check(first.get("ack_verified") is True and first.get("delivery_time_s") and first.get("deadline_s") == 600

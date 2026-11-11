@@ -56,11 +56,12 @@ def smoke_plan(mode: str, config: str) -> list[dict]:
     return plan
 
 
-def campaign_plan(mode: str, config: str, condition: str, load: str, attempts: int) -> list[dict]:
+def campaign_plan(mode: str, config: str, condition: str, load: str, attempts: int,
+                  series: str = "P1") -> list[dict]:
     """Phase 1 cell: every attempt carries the ACK and the attempt deadline."""
     plan = []
     for k in range(1, attempts + 1):
-        tag = logic.campaign_tag(condition, load, k)
+        tag = logic.campaign_tag(condition, load, k, series)
         plan.append({"tag": tag, "ack": True, "args": [
             mode, "--tag", tag, "--phase", "p1", "--payload-size", str(logic.CAMPAIGN_LOADS[load]),
             "--bw-when", "before", "--ack", "--deadline-s", str(logic.CAMPAIGN_DEADLINE_S[load]),
@@ -90,9 +91,11 @@ def main() -> int:
                     help="Phase 1: run one cell in this channel condition")
     ap.add_argument("--load", choices=list(logic.CAMPAIGN_LOADS), default="200B")
     ap.add_argument("--attempts", type=int, default=30)
+    ap.add_argument("--series", choices=["P1", "KIT", "PILOT"], default="P1",
+                    help="P1 campaign, KIT minimum replication kit, PILOT exploratory pilot")
     args = ap.parse_args()
     campaign = args.campaign is not None
-    plan = (campaign_plan(args.mode, args.config, args.campaign, args.load, args.attempts) if campaign
+    plan = (campaign_plan(args.mode, args.config, args.campaign, args.load, args.attempts, args.series) if campaign
             else smoke_plan(args.mode, args.config))
     if not 1 <= args.start <= len(plan):
         print(f"--from must be between 1 and {len(plan)}")
@@ -102,7 +105,8 @@ def main() -> int:
     report = {"mode": args.mode, "started_utc": started.isoformat(timespec="seconds"),
               "gap_s": args.gap_s if args.mode == "send" else 0, "from_step": args.start, "steps": []}
     if campaign:
-        report["campaign"] = {"condition": args.campaign, "load": args.load, "attempts": args.attempts,
+        report["campaign"] = {"series": args.series, "condition": args.campaign, "load": args.load,
+                              "attempts": args.attempts,
                               "deadline_s": logic.CAMPAIGN_DEADLINE_S[args.load]}
     exit_code = 0
     for number, step in enumerate(plan, start=1):

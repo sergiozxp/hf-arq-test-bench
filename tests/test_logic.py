@@ -171,13 +171,19 @@ text = logic.summarize(session)[0]
 check("1 stopped run" in text and "A->B SINAD 58.0" in text, "session summary lists stopped runs and calibration")
 
 # Phase 1 cells
-check(logic.TEST_CHOICES[2] == logic.KIT_TEST and len(logic.CAMPAIGN_TESTS) == 7, "kit and six campaign cells are offered")
+check(logic.TEST_CHOICES[2] == logic.KIT_TEST and len(logic.CAMPAIGN_TESTS) == 9,
+      "kit, two pilots and six campaign cells are offered")
+pilot = "PILOT  Poor, 200 B, 10 attempts (exploratory)"
+check(logic.campaign_commands("A", pilot)[0][-5:-2] == ["--series", "PILOT", "--from"] or
+      "PILOT" in logic.campaign_commands("A", pilot)[0], "the pilot runs as its own series")
+check(logic.campaign_tag("poor", "200B", 3, "PILOT") == "PILOT-poor-200B-03", "pilot tags never mix with P1")
 check(logic.campaign_tag("moderate", "200B", 7) == "P1-moderate-200B-07", "campaign tag carries condition, load and attempt")
 check(logic.campaign_commands("B", logic.KIT_TEST, 4) == [["smoke_sequence.py", "listen", "--campaign", "moderate",
-                                                        "--load", "200B", "--attempts", "10", "--from", "4"]],
+                                                        "--load", "200B", "--attempts", "10", "--series", "KIT",
+                                                        "--from", "4"]],
       "PC B runs the kit from attempt 4")
 check("--gap-s" in logic.campaign_commands("A", "P1  Poor, 10 KiB, 30 attempts")[0], "PC A runs a cell with its gap")
 check(logic.summarize({"mode": "send", "steps": [{}, {}], "completed_steps": 1, "planned_steps": 2,
                        "outcome": "completed", "campaign": {"condition": "poor", "load": "200B"}})[0]
-      .startswith("CELL poor 200B FINISHED"), "a finished cell is summarised")
+      .startswith("CELL P1 poor 200B FINISHED"), "a finished cell is summarised")
 print("ALL LOGIC TESTS PASSED")
