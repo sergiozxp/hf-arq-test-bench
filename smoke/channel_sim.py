@@ -251,9 +251,23 @@ class Log:
             self.file.flush()
 
     def write_status(self, status: dict) -> None:
-        tmp = self.folder / "status.tmp"
-        tmp.write_text(json.dumps(status), encoding="utf-8")
-        tmp.replace(self.folder / "status.json")
+        """Best effort: the status file is only for the GUI, so it never stops the simulator.
+
+        On Windows the replace fails with "Access is denied" while the GUI is reading the
+        file (2026-11-11, first run on the real bench); then it is retried and, if still
+        busy, skipped until the next update half a second later.
+        """
+        try:
+            tmp = self.folder / "status.tmp"
+            tmp.write_text(json.dumps(status), encoding="utf-8")
+            for _ in range(5):
+                try:
+                    tmp.replace(self.folder / "status.json")
+                    return
+                except PermissionError:
+                    time.sleep(0.02)
+        except OSError:
+            pass
 
     def close(self) -> None:
         self.q.put(None)
@@ -321,9 +335,13 @@ def run_audio(args, folder: Path, core: SimulatorCore, log: Log) -> int:
         while stream.active and not (folder / "STOP").exists():
             log.write_status(core.status())
             if args.mode == "transparent" and core.reference_count != saved:
-                save_references(Path(args.results), dict(core.references_found),
-                                {"input": args.input, "output": args.output})
-                saved = core.reference_count
+                try:
+                    save_references(Path(args.results), dict(core.references_found),
+                                    {"input": args.input, "output": args.output})
+                    saved = core.reference_count
+                except OSError as error:   # retried at the next update and at the stop
+                    log.emit({"event": "warning", "detail": f"reference not saved yet: {error!r}",
+                              "t_utc": utc_now()})
             time.sleep(STATUS_EVERY_S)
     if failure:
         log.emit({"event": "error", "detail": failure[0], "t_utc": utc_now()})

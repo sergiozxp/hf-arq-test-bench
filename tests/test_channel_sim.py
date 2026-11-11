@@ -139,4 +139,14 @@ run = subprocess.run([sys.executable, str(ROOT / "smoke" / "channel_sim.py"), "o
                       "--wav-in", str(tmp / "cal.wav"), "--wav-out", str(tmp / "out3.wav"),
                       "--results", str(tmp / "empty")], capture_output=True, text=True)
 check(run.returncode == 2 and "NO REFERENCE" in run.stdout, "without a reference the channel modes refuse to start")
+
+# The status file is best effort: a busy target (Windows "Access is denied") never raises.
+from unittest import mock
+log = sim.Log(tmp / "statuslog")
+with mock.patch("pathlib.Path.replace", side_effect=PermissionError(5, "Access is denied")):
+    log.write_status({"x": 1})
+log.write_status({"x": 2})
+check(json.loads((tmp / "statuslog" / "status.json").read_text(encoding="utf-8")) == {"x": 2},
+      "a busy status file is skipped, not fatal, and the next update succeeds")
+log.close()
 print("ALL SIMULATOR RUNTIME TESTS PASSED")
