@@ -102,6 +102,8 @@ jobs:
           path: |
             dist/HF-ARQ-Modem-Smoke.exe
             dist/SHA256SUMS.txt
+          # Releases keep their own copy; test builds expire sooner so the artifact quota is not hit.
+          retention-days: 21
 
   release:
     # A pushed tag, or "Run workflow" on main with a release tag.
