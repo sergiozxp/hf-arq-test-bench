@@ -62,34 +62,63 @@ binaries.
    (E0-1 16 B, the modem's starting mode); the simulator sets this arm's noise from it.
 4. Record each arm's Drive values; they stay fixed for the campaign.
 
-## 5. Run a cell
+## 5. Blocks: one RUN per PC for each stage of each modem
 
-1. In the simulator window choose the condition (Good, Moderate or Poor), the **Arm**,
-   **SNR reference: Equal RMS SNR (primary)** and the **first attempt number** (normally
-   1), and press **Start simulator**.
-2. On PC A and PC B choose the same test, for example
-   "KIT  Minimum replication kit: Moderate, 200 B, 10 attempts", with the same
-   **Start at attempt**.
-3. Press RUN on PC B, then on PC A. PC A waits 105 s between attempts; leave the
-   bench alone. A failed attempt does not stop the cell.
-4. When both PCs show "CELL … FINISHED", stop the simulator, press **Create results
-   ZIP** on PC B and cross-check it on PC A. The result line shows, per cell, the
-   successes over the counted attempts, the 95 % interval and the median delivery
-   time; the table is saved as `phase1_cells.csv`.
+From the pilot on, the measurements are run in blocks. A block runs every remaining
+attempt of one stage for the modem in use, in a fixed order, with one RUN per PC:
 
-To resume a stopped cell, use the next attempt number in all three places (PC A,
-PC B and the simulator's first attempt).
+| Block | Attempts | Typical duration |
+|---|---|---|
+| Pilot | Good 200 B ×10, then Poor 200 B ×10 | 1–2 h |
+| Campaign | the six P1 cells (Good, Moderate, Poor; 200 B then 10 KiB), 30 attempts each | 1–3 days |
+| Repeat | the missing and not-counted attempts of this modem, from the last cross-check | varies |
 
-## Order of work
+Before a block:
 
-1. Bench validation: CAL through the simulator, the 9-test sequence in Transparent
-   for Mercury, VARA free and VARA licensed (power reference saved for each, peaks at
-   or below -3 dBFS), then the
-   kit (Moderate, 200 B, 10 attempts) for the three arms.
-2. Pilot (exploratory): "PILOT  Good, 200 B, 10 attempts" and "PILOT  Poor, …" for the
-   three arms; the kit covers Moderate. If a condition is 0 % or 100 % for all three
-   arms, its SNR is changed once, with the reason recorded.
-3. Campaign: the six "P1" cells of 30 attempts for each arm.
+1. Open the modem (Mercury from the GUI; VARA with the Drive recorded in step 4).
+   Disable sleep and automatic updates on the three computers.
+2. Simulator window (PC B): Channel **Automatic: follow PC B's blocks and cells**,
+   SNR reference **Equal RMS SNR (primary)**, press **Start simulator**. In Automatic
+   mode the simulator takes the condition, attempt number and arm of every attempt
+   from PC B, so it needs no other setting.
+
+Running it:
+
+3. On PC B and PC A choose the same block, for example
+   "BLOCK  Pilot for this modem: …". Press RUN on PC B, then on PC A when PC B
+   shows `waiting_for_connection`. Both PCs print the first attempt they will run
+   ("First: PILOT-good-200B-01"); it must be the same on both.
+4. Leave the bench alone. A failed attempt is a result and does not stop the block.
+   At the end each PC creates its results ZIP by itself
+   (`results_<PC>_<modem>_<block>_<time>.zip`, beside the program).
+
+What the block checks for you:
+
+- **Resume.** Each PC skips the attempts it has already completed for this modem. After
+  a power cut or a stop, press RUN again on PC B and then PC A; check that both show
+  the same first attempt.
+- **Bench faults.** The block stops after 3 attempts in a row that point to the bench,
+  not the channel: no result (script error or modem not reachable), an infrastructure
+  or procedure fault, or no connection at all in Good or Moderate. (In Poor, failing to
+  connect can be the channel itself and is a result.) Fix the cause and press RUN again.
+- **Same modem and Drive.** The first block of each modem records, on each PC, the modem
+  binary and VARA's Drive level (`results/arm_settings.json`). A later block refuses to
+  start if either changed.
+- **Simulator ready.** PC B refuses to start a block unless the simulator runs in
+  Automatic mode and the modem has a saved power reference.
+
+After a block:
+
+5. Copy PC B's ZIP to PC A and PC A's ZIP to PC B (USB stick). On **both** PCs press
+   **Cross-check with the other PC's ZIP…** and choose the other PC's ZIP. The result
+   line shows the cell table; it is also saved as `phase1_cells.csv`.
+6. If the cell table lists attempts not counted (or missing), choose
+   "BLOCK  Repeat missing and not-counted attempts" on both PCs and run it like any
+   block (PC B first). Each attempt is repeated with its own number, so with the same
+   trace. Then exchange the new ZIPs and cross-check again.
+
+Single cells ("KIT …", "PILOT …", "P1 …") can still be run one at a time with a start
+attempt; with the simulator in Automatic mode they need no simulator setting either.
 
 ## What is not counted
 

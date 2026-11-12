@@ -28,7 +28,9 @@ class SimulatorWindow(tk.Toplevel):
         frame = ttk.Frame(self)
         frame.pack(fill="both", expand=True, padx=8, pady=8)
         ttk.Label(frame, text=("UCA-S carries A->B on its left channel and B->A on its right channel. "
-                               "Start in Transparent mode, run CAL on both PCs, then choose a condition."),
+                               "Start in Transparent mode, run CAL on both PCs and save each arm's power reference. "
+                               "For blocks and cells choose Automatic: PC B then tells the simulator the "
+                               "condition, attempt and arm of every attempt."),
                   wraplength=640).grid(row=0, column=0, columnspan=3, sticky="w", **pad)
         ttk.Label(frame, text="Input (UCA-S, from both PCs):").grid(row=1, column=0, sticky="w", **pad)
         self.input_choice = tk.StringVar()
@@ -47,7 +49,7 @@ class SimulatorWindow(tk.Toplevel):
         self.first = tk.IntVar(value=1)
         ttk.Spinbox(frame, from_=1, to=30, textvariable=self.first, width=4, state="readonly").grid(
             row=4, column=1, sticky="w")
-        ttk.Label(frame, text="Arm (modem under test):").grid(row=5, column=0, sticky="w", **pad)
+        ttk.Label(frame, text="Arm (Transparent; Automatic takes it from PC B):").grid(row=5, column=0, sticky="w", **pad)
         self.arm = tk.StringVar(value=control.ARMS[0])
         ttk.Combobox(frame, textvariable=self.arm, values=list(control.ARMS), width=48,
                      state="readonly").grid(row=5, column=1, sticky="w")
@@ -122,7 +124,7 @@ class SimulatorWindow(tk.Toplevel):
         if mode != "transparent" and control.read_reference(self.results) is None:
             messagebox.showwarning("No reference", control.describe_reference(None)[0], parent=self)
             return
-        if mode != "transparent" and snr_reference == "rms" and \
+        if mode not in ("transparent", "auto") and snr_reference == "rms" and \
                 self.arm.get() not in control.read_modem_power(self.results):
             messagebox.showwarning("No power reference",
                                    control.describe_power({}, self.arm.get())[0], parent=self)

@@ -196,4 +196,52 @@ check(ends[0]["valid"] and ends[0]["arm"] == arm and ends[0]["snr_reference"] ==
       "a burst 0.5 dB above the tone's peak is fine in RMS mode (no ±1 dB peak rule)")
 check(not ends[1]["valid"] and any("ceiling" in p for p in ends[1]["problems"]),
       "a peak above -3 dBFS is not counted (safety ceiling)")
+# ---------------------------------------------------------------- Automatic mode (blocks, alpha.5)
+def entry(eid, state, cond="moderate", k=3, tag=None, a=arm):
+    return {"id": eid, "state": state, "condition": cond, "attempt": k, "arm": a, "series": "P1",
+            "load": "200B", "tag": tag or f"P1-{cond}-200B-{k:02d}", "written_utc": sim.utc_now()}
+
+
+events = []
+auto = sim.SimulatorCore("auto", reference, emit=events.append, snr_reference="rms", modem_power=power)
+a_left = np.concatenate([burst(12, -6.0), silence(2)])
+a_right = np.concatenate([silence(4), burst(3, -6.4), silence(7)])
+feed(auto, a_left, a_right)
+check(not [e for e in events if e["event"] == "attempt_start"] and any(e["event"] == "stray_audio" for e in events),
+      "auto: audio while PC B announces nothing is not an attempt")
+events.clear()
+auto2 = sim.SimulatorCore("auto", reference, emit=events.append, snr_reference="rms", modem_power=power)
+auto2.offer(entry("e1", "listening"))
+out_auto = feed(auto2, a_left, a_right)
+manual = sim.SimulatorCore("moderate", reference, first_attempt=3, emit=lambda e: None, snr_reference="rms",
+                           arm=arm, modem_power=power)
+out_manual = feed(manual, a_left, a_right)
+check(np.allclose(out_auto, out_manual), "auto: attempt k gives exactly the same output as manual mode with attempt k")
+starts = [e for e in events if e["event"] == "attempt_start"]
+check(len(starts) == 1 and starts[0]["attempt"] == 3 and starts[0]["mode"] == "moderate"
+      and starts[0]["tag"] == "P1-moderate-200B-03" and starts[0]["arm"] == arm,
+      "auto: condition, attempt, arm and tag come from PC B's announcement")
+feed(auto2, np.concatenate([silence(35), burst(3, -6.0)]), silence(38))
+check(any(e["event"] == "audio_resumed" for e in events) and len([e for e in events if e["event"] == "attempt_start"]) == 1,
+      "auto: audio after 30 s of silence continues the announced attempt instead of starting another")
+auto2.offer(entry("e1", "finished"))
+feed(auto2, silence(1), silence(1))
+ends = [e for e in events if e["event"] == "attempt_end"]
+check(len(ends) == 1 and ends[0]["valid"] and ends[0]["tag"] == "P1-moderate-200B-03"
+      and ends[0]["directions"]["A->B"].get("effective_snr_db") is not None,
+      "auto: PC B's 'finished' ends the attempt, with its effective SNR")
+auto2.offer(entry("e2", "listening", cond="poor", k=7, a="Mercury 1.9.19"))
+feed(auto2, np.concatenate([burst(5, -6.0), silence(1)]), silence(6))
+auto2.finish()
+last = [e for e in events if e["event"] == "attempt_end"][-1]
+check(last["attempt"] == 7 and not last["valid"] and any("no RMS power reference" in p for p in last["problems"]),
+      "auto: an arm without a power reference gives an attempt that is not counted")
+announce_dir = Path(tempfile.mkdtemp(prefix="hf_arq_announce_"))
+(announce_dir / "simulator").mkdir()
+import datetime as _dt
+before = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=1)
+(announce_dir / "simulator" / "announce.json").write_text(json.dumps(entry("e3", "listening")), encoding="utf-8")
+check(sim.read_announcement(announce_dir, before) is not None
+      and sim.read_announcement(announce_dir, before + _dt.timedelta(minutes=5)) is None,
+      "auto: an announcement written before the simulator started is ignored")
 print("ALL SIMULATOR RUNTIME TESTS PASSED")

@@ -3,7 +3,12 @@
 UCA-S input L  (from PC A)  -> channel A->B -> UCA-S output L (to PC B's modem)
 UCA-S input R  (from PC B)  -> channel B->A -> UCA-S output R (to PC A's modem)
 
-Modes: transparent (output gain only) or good / moderate / poor (Watterson + noise).
+Modes: transparent (output gain only), good / moderate / poor (Watterson + noise), or auto:
+the condition, attempt number and arm of each attempt come from PC B, which writes
+results/simulator/announce.json before it listens for an attempt ("listening") and when the
+attempt has ended ("finished"). In auto mode an attempt starts at the first audio from PC A
+after an announcement, and ends when PC B announces its end; audio while PC B announces no
+attempt is not part of any attempt.
 
 In transparent mode the simulator also measures the reference: when the bench
 calibration tone (1500 Hz) arrives steadily for at least 3 s on an input, its power
@@ -16,7 +21,7 @@ input peak and mean power per direction, output clipping and audio dropouts.
 
 USAGE
   python channel_sim.py list
-  python channel_sim.py run --input <device> --output <device> --mode transparent|good|moderate|poor
+  python channel_sim.py run --input <device> --output <device> --mode transparent|good|moderate|poor|auto
                             [--first-attempt 1] [--results results]
   python channel_sim.py offline --wav-in in.wav --wav-out out.wav --mode ... (tests)
 The run stops when the file STOP appears in its log folder (written by the GUI).
@@ -46,6 +51,8 @@ PEAK_TOLERANCE_DB = 1.0       # "peak" SNR reference only (secondary, PEP-limite
 PEAK_CEILING_DBFS = -3.0      # safety: a modem's peak at the simulator input must stay below this
 ARMS = ("Mercury 1.9.19", "VARA HF unlicensed", "VARA HF licensed")
 SNR_REFERENCES = ("rms", "peak")
+AUTO = "auto"                 # follow PC B's announcement of each attempt (blocks, alpha.5)
+ANNOUNCE_NAME = "announce.json"
 STATUS_EVERY_S = 0.5
 CHANNELS = ("A->B", "B->A")  # input/output L, R
 
@@ -117,12 +124,12 @@ class SimulatorCore:
                  snr_reference: str = "rms", arm: str | None = None, modem_power: dict | None = None):
         """snr_reference 'rms' (primary): noise from the arm's measured RMS power per direction,
         fixed for the run. 'peak' (secondary, PEP-limited): noise from the calibration tone."""
-        if mode != "transparent" and (mode not in cm.CONDITIONS or reference is None):
+        if mode != "transparent" and ((mode not in cm.CONDITIONS and mode != AUTO) or reference is None):
             raise ValueError("a channel mode needs a known condition and a reference from the calibration")
         if snr_reference not in SNR_REFERENCES:
             raise ValueError(f"unknown SNR reference {snr_reference}")
         power = (modem_power or {}).get(arm or "", {})
-        if mode != "transparent" and snr_reference == "rms" and not all(d in power for d in CHANNELS):
+        if mode in cm.CONDITIONS and snr_reference == "rms" and not all(d in power for d in CHANNELS):
             raise ValueError(f"no RMS power reference for '{arm}': run its Transparent smoke sequence and "
                              "save it as the arm's power reference")
         self.mode, self.reference, self.emit = mode, reference, emit
@@ -132,7 +139,16 @@ class SimulatorCore:
                                else tone_refs.get(d, {}).get("p_ref", cm.reference_power()))
                            for d in CHANNELS}
         self.noise_power = ({d: self.signal_ref[d] / 10 ** (cm.CONDITIONS[mode].snr_db / 10) for d in CHANNELS}
-                            if mode != "transparent" else {})
+                            if mode in cm.CONDITIONS else {})
+        # cond: the channel condition of the current attempt. In Automatic mode it comes from PC B's
+        # announcement of each attempt (condition, attempt number, arm), the run mode stays "auto".
+        self.cond = None if mode == AUTO else mode
+        self.modem_power = modem_power or {}
+        self.entry: dict | None = None          # announcement of the current attempt (auto)
+        self.announced: dict | None = None      # latest announcement seen (auto)
+        self.pending: tuple | None = None       # (entry, paths, signal_ref, noise_power, problems)
+        self.attempt_problems: list[str] = []
+        self.stray_logged = False
         self.run_power = {d: [0.0, 0] for d in CHANNELS}     # completed attempts without the CAL tone
         # The arm's power reference is its RMS in the first modem attempt of a Transparent run
         # (the E0-1 16 B test: connection and a short transfer at the modem's starting mode).
@@ -142,7 +158,8 @@ class SimulatorCore:
         self.started = False
         self.samples = 0
         self.last_active = -1e9
-        self.paths = {d: cm.ChannelPath(mode, d, self.signal_ref[d], first_attempt) for d in CHANNELS}
+        self.paths = {d: cm.ChannelPath(mode if mode != AUTO else "transparent", d, self.signal_ref[d],
+                                        first_attempt) for d in CHANNELS}
         self.stats = {d: DirectionStats() for d in CHANNELS}
         self.xruns = {"input_overflow": 0, "output_underflow": 0}
         self.attempt_xruns = dict(self.xruns)
@@ -152,23 +169,86 @@ class SimulatorCore:
         self.reference_count = 0
 
     # -- attempts
+    def offer(self, entry: dict | None, modem_power: dict | None = None) -> None:
+        """Automatic mode: PC B's announcement (results/simulator/announce.json), read by the control
+        loop, never in the audio callback. A new 'listening' entry prepares the next attempt's
+        channel here (filters and fading taps); the audio callback only swaps it in."""
+        if self.mode != AUTO or not entry or entry == self.announced:
+            return
+        if modem_power is not None:
+            self.modem_power = modem_power
+        new = entry.get("state") == "listening" and entry.get("id") != (self.entry or {}).get("id") \
+            and entry.get("id") != ((self.pending or (None,))[0] or {}).get("id")
+        if new:
+            cond, arm, k = entry.get("condition"), entry.get("arm"), int(entry.get("attempt") or 0)
+            problems = []
+            power = self.modem_power.get(arm or "", {})
+            tone_refs = (self.reference or {}).get("directions", {})
+            if cond not in cm.CONDITIONS or k < 1:
+                problems.append(f"PC B announced an unknown condition or attempt ({cond}, {k})")
+                cond = "transparent"
+            if self.snr_reference == "rms" and not all(d in power for d in CHANNELS):
+                problems.append(f"no RMS power reference for '{arm}'")
+            ref = {d: (power[d]["p_rms"] if self.snr_reference == "rms" and d in power
+                       else tone_refs.get(d, {}).get("p_ref", cm.reference_power())) for d in CHANNELS}
+            if problems:
+                cond = "transparent"
+            paths = {d: cm.ChannelPath(cond, d, ref[d], max(k, 1)) for d in CHANNELS}
+            noise = ({d: ref[d] / 10 ** (cm.CONDITIONS[cond].snr_db / 10) for d in CHANNELS}
+                     if cond in cm.CONDITIONS else {})
+            self.pending = (dict(entry), paths, ref, noise, problems)
+        self.announced = dict(entry)
+        self.emit({"event": "announcement", "t_utc": utc_now(), **entry})
+
     def _start_attempt(self, t_s: float) -> None:
         if self.started:
             self._end_attempt()
-        self.attempt += 1
+        self.attempt_problems = []
+        if self.mode == AUTO:
+            entry, self.paths, self.signal_ref, self.noise_power, self.attempt_problems = self.pending
+            self.pending = None
+            self.entry = entry
+            self.cond = entry.get("condition") if not self.attempt_problems else "transparent"
+            self.arm = entry.get("arm")
+            self.attempt = int(entry.get("attempt") or 0)
+        else:
+            self.attempt += 1
         self.started = True
+        self.stray_logged = False
         for d in CHANNELS:
-            self.paths[d].reset(self.attempt)
+            if self.mode != AUTO:
+                self.paths[d].reset(self.attempt)
             self.stats[d] = DirectionStats()
         self.attempt_xruns = {k: 0 for k in self.xruns}
         self.attempt_tone = False
         self.attempt_start = utc_now()
-        self.emit({"event": "attempt_start", "attempt": self.attempt, "t_utc": self.attempt_start,
-                   "stream_s": round(t_s, 3), "mode": self.mode, "arm": self.arm,
-                   "snr_reference": self.snr_reference,
-                   "seeds": None if self.mode == "transparent" else
-                   {d: [cm.SEED_ROOT, cm.CONDITIONS[self.mode].code, cm.DIRECTIONS[d], self.attempt]
-                    for d in CHANNELS}})
+        record = {"event": "attempt_start", "attempt": self.attempt, "t_utc": self.attempt_start,
+                  "stream_s": round(t_s, 3), "mode": self.cond, "arm": self.arm,
+                  "snr_reference": self.snr_reference,
+                  "seeds": None if self.cond not in cm.CONDITIONS else
+                  {d: [cm.SEED_ROOT, cm.CONDITIONS[self.cond].code, cm.DIRECTIONS[d], self.attempt]
+                   for d in CHANNELS}}
+        if self.mode == AUTO:
+            record.update(auto=True, tag=self.entry.get("tag"), series=self.entry.get("series"),
+                          announcement=self.entry.get("id"))
+        self.emit(record)
+
+    def _audio_after_silence(self, t_s: float) -> None:
+        """Automatic mode: what audio from PC A after a silence (or the first audio) means."""
+        pending = self.pending and self.pending[0].get("id") != (self.entry or {}).get("id")
+        if pending:
+            self._start_attempt(t_s)
+            return
+        current = self.started and self.announced and self.entry and \
+            self.announced.get("id") == self.entry.get("id") and self.announced.get("state") == "listening"
+        if current:
+            self.emit({"event": "audio_resumed", "attempt": self.attempt, "t_utc": utc_now(),
+                       "tag": self.entry.get("tag")})
+            return
+        if not self.stray_logged:
+            self.emit({"event": "stray_audio", "t_utc": utc_now(),
+                       "detail": "audio from PC A while PC B announced no attempt; not part of any attempt"})
+            self.stray_logged = True
 
     def _refs(self) -> dict:
         """The saved reference, updated by any calibration tone measured in this run."""
@@ -179,7 +259,7 @@ class SimulatorCore:
     def _end_attempt(self) -> None:
         refs = self._refs()
         summary = {d: self.stats[d].summary(refs.get(d)) for d in CHANNELS}
-        problems = []
+        problems = list(self.attempt_problems)
         if any(self.attempt_xruns.values()):
             problems.append(f"audio dropouts {self.attempt_xruns}")
         for d in CHANNELS:
@@ -201,11 +281,14 @@ class SimulatorCore:
                 summary[d]["effective_snr_db"] = round(10 * math.log10(mean / self.noise_power[d]), 2)
         if self.base_power is None and not self.attempt_tone and self.stats["A->B"].active_blocks:
             self.base_power = {d: [self.stats[d].active_power, self.stats[d].active_blocks] for d in CHANNELS}
-        self.emit({"event": "attempt_end", "attempt": self.attempt, "t_utc": utc_now(),
-                   "started_utc": self.attempt_start, "mode": self.mode, "arm": self.arm,
-                   "snr_reference": self.snr_reference, "calibration_tone": self.attempt_tone,
-                   "directions": summary,
-                   "xruns": dict(self.attempt_xruns), "valid": not problems, "problems": problems})
+        record = {"event": "attempt_end", "attempt": self.attempt, "t_utc": utc_now(),
+                  "started_utc": self.attempt_start, "mode": self.cond, "arm": self.arm,
+                  "snr_reference": self.snr_reference, "calibration_tone": self.attempt_tone,
+                  "directions": summary,
+                  "xruns": dict(self.attempt_xruns), "valid": not problems, "problems": problems}
+        if self.mode == AUTO and self.entry:
+            record.update(auto=True, tag=self.entry.get("tag"), announcement=self.entry.get("id"))
+        self.emit(record)
 
     # -- reference tone (transparent mode)
     def _tone_block(self, d: str, x: np.ndarray) -> None:
@@ -247,9 +330,17 @@ class SimulatorCore:
                 self.emit({"event": "xrun", "kind": key, "attempt": self.attempt, "t_utc": utc_now()})
         t_s = self.samples / cm.FS
         x = np.asarray(block, dtype=np.float64)
+        if (self.mode == AUTO and self.started and self.announced and self.entry
+                and self.announced.get("id") == self.entry.get("id") and self.announced.get("state") == "finished"):
+            self._end_attempt()             # PC B has ended this attempt
+            self.started = False
         rms_l = float(np.sqrt(np.mean(x[:, 0] ** 2)))
         if rms_l > 0 and 20 * math.log10(rms_l) > ACTIVE_DBFS:
-            if t_s - self.last_active >= SILENCE_S or not self.started:
+            gap = t_s - self.last_active >= SILENCE_S
+            if self.mode == AUTO:
+                if gap or not self.started:
+                    self._audio_after_silence(t_s)
+            elif gap or not self.started:
                 self._start_attempt(t_s)
             self.last_active = t_s
         out = np.empty_like(x)
@@ -292,7 +383,10 @@ class SimulatorCore:
                     "active_s": round(base_src[d][1] * cm.BLOCK / cm.FS, 1) if base_src else 0.0,
                     "rms_dbfs": dbfs_power(base_src[d][0] / base_src[d][1])
                     if base_src and base_src[d][1] else None} for d in CHANNELS}
-        return {"t_utc": utc_now(), "mode": self.mode, "arm": self.arm, "snr_reference": self.snr_reference,
+        return {"t_utc": utc_now(), "mode": self.mode, "condition": self.cond, "arm": self.arm,
+                "snr_reference": self.snr_reference,
+                "tag": (self.entry or {}).get("tag") if self.started else None,
+                "announced": self.announced,
                 "run_power": run, "base_power": base,
                 "attempt": self.attempt if self.started else None,
                 "seconds_since_audio": round(self.samples / cm.FS - self.last_active, 1)
@@ -366,6 +460,16 @@ def save_references(results: Path, found: dict, devices: dict) -> None:
     path.write_text(json.dumps(record, indent=2), encoding="utf-8")
 
 
+def read_announcement(results: Path, not_before: datetime) -> dict | None:
+    """PC B's latest announcement, if written after the simulator started."""
+    try:
+        entry = json.loads((results / "simulator" / ANNOUNCE_NAME).read_text(encoding="utf-8"))
+        written = datetime.fromisoformat(entry["written_utc"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return entry if written >= not_before else None
+
+
 # ------------------------------------------------------------------ audio
 def audio_devices() -> dict:
     import sounddevice as sd
@@ -405,7 +509,12 @@ def run_audio(args, folder: Path, core: SimulatorCore, log: Log) -> int:
                   "input": args.input, "output": args.output})
         print(f"Simulator running ({args.mode}); latency {stream.latency}", flush=True)
         saved = 0
+        started = datetime.now(timezone.utc)
         while stream.active and not (folder / "STOP").exists():
+            if args.mode == AUTO:
+                entry = read_announcement(Path(args.results), started)
+                if entry and entry != core.announced:
+                    core.offer(entry, load_modem_power(Path(args.results)))
             log.write_status(core.status())
             if args.mode == "transparent" and core.reference_count != saved:
                 try:
@@ -446,7 +555,7 @@ def main() -> int:
     sub.add_parser("list", help="list stereo audio devices (MME)")
     for name in ("run", "offline"):
         p = sub.add_parser(name)
-        p.add_argument("--mode", required=True, choices=["transparent", *cm.CONDITIONS])
+        p.add_argument("--mode", required=True, choices=["transparent", *cm.CONDITIONS, AUTO])
         p.add_argument("--first-attempt", type=int, default=1)
         p.add_argument("--results", default="results")
         p.add_argument("--snr-reference", choices=SNR_REFERENCES, default="rms",
@@ -486,7 +595,7 @@ def main() -> int:
               "devices": devices, "reference": reference, "block": cm.BLOCK, "rate": cm.FS,
               "output_gain_db": cm.OUTPUT_GAIN_DB, "snr_reference": args.snr_reference, "arm": args.arm,
               "modem_power": load_modem_power(results).get(args.arm or ""),
-              "condition": None if args.mode == "transparent" else cm.CONDITIONS[args.mode].__dict__})
+              "condition": cm.CONDITIONS[args.mode].__dict__ if args.mode in cm.CONDITIONS else None})
     print(f"Simulator log: {folder}", flush=True)
     try:
         code = run_offline(args, core) if args.command == "offline" else run_audio(args, folder, core, log)

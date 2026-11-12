@@ -171,8 +171,17 @@ text = logic.summarize(session)[0]
 check("1 stopped run" in text and "A->B SINAD 58.0" in text, "session summary lists stopped runs and calibration")
 
 # Phase 1 cells
-check(logic.TEST_CHOICES[2] == logic.KIT_TEST and len(logic.CAMPAIGN_TESTS) == 9,
-      "kit, two pilots and six campaign cells are offered")
+check(logic.TEST_CHOICES[2:5] == list(logic.BLOCK_TESTS) and logic.TEST_CHOICES[5] == logic.KIT_TEST
+      and len(logic.CAMPAIGN_TESTS) == 9, "three blocks, then the kit, two pilots and six campaign cells are offered")
+check(logic.block_commands("B", logic.BLOCK_CAMPAIGN) == [["smoke_sequence.py", "listen", "--block", "campaign"]]
+      and logic.block_commands("A", logic.BLOCK_PILOT)[0][:4] == ["smoke_sequence.py", "send", "--block", "pilot"],
+      "block commands")
+check("180 attempts" in logic.test_tag(logic.BLOCK_CAMPAIGN, 1) and "20 attempts" in logic.test_tag(logic.BLOCK_PILOT, 1),
+      "block labels count their attempts")
+text, color = logic.summarize({"mode": "listen", "planned_steps": 3, "steps": [{}] * 3, "completed_steps": 3,
+                               "outcome": "stopped", "stop_reason": "3 attempts in a row point to the bench.",
+                               "block": {"kind": "campaign", "arm": "Mercury 1.9.19"}, "skipped_done": 5})
+check(color == "red" and "resumes" in text, "a stopped block says how to resume")
 pilot = "PILOT  Poor, 200 B, 10 attempts (exploratory)"
 check(logic.campaign_commands("A", pilot)[0][-5:-2] == ["--series", "PILOT", "--from"] or
       "PILOT" in logic.campaign_commands("A", pilot)[0], "the pilot runs as its own series")

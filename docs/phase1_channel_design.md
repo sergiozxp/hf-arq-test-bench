@@ -99,6 +99,18 @@ first simulator attempt that starts after PC B's run began listening. A missing
 attempt, another condition or another attempt number makes the pair not counted.
 (With an optional separate simulator PC, set its clock to PC B's before the campaign.)
 
+**Automatic mode (blocks, alpha.5).** Instead of counting attempts from silences, the
+simulator can follow PC B, which runs on the same computer: before it listens for an
+attempt PC B writes `results/simulator/announce.json` with the attempt's tag,
+condition, attempt number k and arm (state "listening"), and when the attempt has
+ended it writes the same entry with state "finished". The simulator prepares attempt
+k's channel from the announcement, starts the attempt at the first audio from PC A,
+and ends it at "finished"; audio after a silence within the announced attempt
+continues it, and audio while no attempt is announced belongs to no attempt. Each
+simulator attempt then carries the run's tag, and the cross-check requires it to match.
+The channel itself is the same: attempt k gives exactly the same output in Automatic
+and manual mode. PC A needs no connection to either.
+
 The common trace reduces the variance between arms; it does not make conditions
 identical, because each modem uses the channel for a different time.
 
@@ -139,7 +151,9 @@ same-session ACK (E0-3 procedure).
 ## 6. Campaign and minimum replication kit
 
 - **Campaign:** 3 arms x 3 conditions x 2 loads = 18 cells of 30 attempts (540).
-  Run one arm at a time, condition by condition, both loads.
+  Run one arm at a time, condition by condition, both loads: one campaign block per arm
+  (phase1_guide.md, section 5). An attempt counts once: a later run of an attempt that
+  is already counted is listed as not counted.
 - **Minimum replication kit:** CAL plus 200 B in the moderate condition, 10 attempts
   per arm. For this bench it is also the moderate part of the pilot.
 - **Series.** Kit (`KIT-…`), pilot (`PILOT-…`, good and poor, 200 B, 10 attempts) and

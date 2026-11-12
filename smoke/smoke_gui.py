@@ -371,8 +371,13 @@ class ModemSmokeWindow(tk.Tk):
         name = self.test_name.get()
         sequence = logic.is_sequence(name)
         campaign = logic.is_campaign(name)
+        block = logic.is_block(name)
         enabled = sequence or campaign or logic.is_h1(name)
-        if campaign:
+        if block:
+            limit, kind = 1, ("block", 0)
+            label, hint = ("Start at:", "Automatic: each PC skips the attempts it has already completed "
+                                        "for this modem, so RUN resumes a stopped block.")
+        elif campaign:
             limit = logic.CAMPAIGN_TESTS[name]["attempts"]
             kind = ("campaign", limit)
             label, hint = (f"Start at attempt (1–{limit}):",
@@ -406,10 +411,16 @@ class ModemSmokeWindow(tk.Tk):
                                          "then records (path B->A)." if self.values["role"].get() == "A"
                                          else "Start PC B first: it records (path A->B), then plays.")))
             return
-        if campaign:
+        if block:
+            order = (" Start PC B first (simulator in Automatic mode), then this PC when PC B shows "
+                     "'waiting_for_connection'. Both PCs must show the same first attempt."
+                     if self.values["role"].get() == "A"
+                     else " Start the simulator in Automatic mode, then this PC, then PC A. At the end a "
+                          "results ZIP is created by itself.")
+        elif campaign:
             order = (" Start PC B and the simulator first. PC A waits "
                      f"{logic.CAMPAIGN_GAP_S} s between attempts." if self.values["role"].get() == "A"
-                     else " Start the simulator (same condition and first attempt), then this PC, then PC A.")
+                     else " Start the simulator (Automatic, or the same condition and first attempt), then this PC, then PC A.")
         if sequence:
             order = (" Start PC B first. PC A waits "
                      f"{logic.SEQUENCE_GAP_S} s between tests ({logic.SEQUENCE_GAP_S + 60} s after E0-3)." if self.values["role"].get() == "A"
@@ -941,7 +952,10 @@ class ModemSmokeWindow(tk.Tk):
         sequence = logic.is_sequence(test_name)
         campaign = logic.is_campaign(test_name)
         repetition = self.repeat.get() if (sequence or campaign or logic.is_h1(test_name)) else 1
-        if campaign:
+        if logic.is_block(test_name):
+            commands = logic.block_commands(values["role"], test_name)
+            tag = logic.test_tag(test_name, 1)
+        elif campaign:
             commands = logic.campaign_commands(values["role"], test_name, repetition)
             tag = logic.test_tag(test_name, repetition)
         elif sequence:

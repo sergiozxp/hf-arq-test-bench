@@ -249,7 +249,7 @@ def find_simulator_attempts(root: Path, origin: str) -> list[dict]:
             directions = (end or {}).get("directions") or {}
             attempts.append({"log": log.parent.name, "pc": origin, "attempt": start["attempt"],
                              "mode": start.get("mode"), "arm": start.get("arm"),
-                             "snr_reference": start.get("snr_reference"),
+                             "snr_reference": start.get("snr_reference"), "tag": start.get("tag"),
                              "effective_snr_db": {d: v.get("effective_snr_db") for d, v in directions.items()},
                              "start": datetime.fromisoformat(start["t_utc"]),
                              "valid": bool(end and end.get("valid")),
@@ -302,6 +302,8 @@ def attach_simulator(row: dict, sender: dict, receiver: dict, sim_attempts: list
         row["effective_snr_db"] = (sim.get("effective_snr_db") or {}).get("A->B")
         if sim.get("snr_reference") == "rms" and sim.get("arm") and sim["arm"] != row.get("arm"):
             reasons.append(f"the simulator's noise was set for {sim['arm']}, the run is {row.get('arm')}")
+        if sim.get("tag") and sim["tag"] != sender["tag"]:
+            reasons.append(f"PC B announced {sim['tag']} to the simulator, the run is {sender['tag']}")
         if sim["attempt"] != attempt:
             reasons.append(f"the simulator used attempt {sim['attempt']}'s trace for attempt {attempt}")
         if not sim["valid"]:
@@ -314,9 +316,20 @@ def attach_simulator(row: dict, sender: dict, receiver: dict, sim_attempts: list
 
 def cell_table(rows: list[dict]) -> list[dict]:
     cells: dict[tuple, dict] = {}
+    seen: set[tuple] = set()
     for row in rows:
         if "condition" not in row:
             continue
+        # An attempt counts once: a later run of an attempt already counted (for example after
+        # resuming a block on one PC only) is listed as not counted.
+        once = (row.get("series", "P1"), row.get("arm"), row["condition"], row["load"], row.get("attempt"))
+        if row["outcome"] in ("passed", "failed"):
+            if once in seen:
+                row["attempt_outcome"] = row["outcome"]
+                row["outcome"] = "not_counted"
+                row["not_counted_reasons"] = ["this attempt was already counted in an earlier run"]
+            else:
+                seen.add(once)
         key = (row.get("series", "P1"), row.get("arm"), row["condition"], row["load"])
         cell = cells.setdefault(key, {"series": key[0], "arm": key[1], "condition": key[2], "load": key[3],
                                       "attempts": 0,
@@ -405,6 +418,7 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
         r["path"].with_name("cross_check.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         rows.append(result)
+    cells = cell_table(rows)      # may mark repeated attempts as not counted
     counts: dict[str, int] = {}
     for row in rows:
         counts[row["outcome"]] = counts.get(row["outcome"], 0) + 1
@@ -424,15 +438,16 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
                                   or (item["started_utc"] or "") > (latest[item["direction"]]["started_utc"] or "")):
             latest[item["direction"]] = item
     report["calibration"] = {"latest": latest, "all": calibrations}
-    report["cells"] = cell_table(rows)
+    report["cells"] = cells
     if report["cells"]:
         # A Phase 1 session: failures are results; the session needs review only for
         # attempts that could not be counted, crossed runs or runs without a partner.
         clean = (not crossed and not unpaired and not any(c["not_counted"] for c in report["cells"])
                  and not any(c.get("warning") for c in report["cells"]))
         report["outcome"] = "passed" if clean else "review"
-    report["outcome"] = ("passed" if rows and set(counts) == {"passed"} and not crossed
-                         else "review")
+    else:
+        report["outcome"] = ("passed" if rows and set(counts) == {"passed"} and not crossed
+                             else "review")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "cross_check_report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

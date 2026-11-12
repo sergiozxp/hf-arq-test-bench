@@ -9,6 +9,7 @@ from pathlib import Path
 
 MODES = {
     "Transparent (no fading, no noise)": "transparent",
+    "Automatic: follow PC B's blocks and cells (recommended)": "auto",
     "Good: 0.5 ms, 0.1 Hz, +10 dB": "good",
     "Moderate: 1 ms, 0.5 Hz, +3 dB": "moderate",
     "Poor: 2 ms, 1 Hz, -3 dB": "poor",
@@ -106,9 +107,20 @@ def describe_status(status: dict | None) -> tuple[str, str]:
         return "Simulator not running.", "gray"
     xruns = status.get("xruns_total") or {}
     dropouts = sum(xruns.values())
-    parts = [f"Mode: {status.get('mode')}" + (f" ({status['snr_reference']} SNR, {status['arm']})"
-                                             if status.get("arm") and status.get("mode") != "transparent" else ""),
-             f"attempt {status['attempt']}" if status.get("attempt") is not None else "waiting for audio from PC A"]
+    if status.get("mode") == "auto":
+        announced = status.get("announced") or {}
+        head = f"Mode: automatic ({status.get('snr_reference')} SNR)"
+        if status.get("tag"):
+            now = f"running {status['tag']} ({status.get('arm')}, {status.get('condition')})"
+        elif announced.get("state") == "listening":
+            now = f"PC B announced {announced.get('tag')} ({announced.get('arm')}): waiting for audio from PC A"
+        else:
+            now = "waiting for PC B to announce the next attempt"
+        parts = [head, now]
+    else:
+        parts = [f"Mode: {status.get('mode')}" + (f" ({status['snr_reference']} SNR, {status['arm']})"
+                                                 if status.get("arm") and status.get("mode") != "transparent" else ""),
+                 f"attempt {status['attempt']}" if status.get("attempt") is not None else "waiting for audio from PC A"]
     if status.get("seconds_since_audio") is not None:
         parts.append(f"last audio {status['seconds_since_audio']:.0f} s ago")
     parts.append(f"dropouts {dropouts}")

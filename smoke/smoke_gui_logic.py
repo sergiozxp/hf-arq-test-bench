@@ -212,8 +212,21 @@ for _cond, _label in CAMPAIGN_CONDITIONS.items():
         CAMPAIGN_TESTS[f"P1  {_label}, {CAMPAIGN_LOAD_LABELS[_load]}, 30 attempts"] = dict(
             series="P1", condition=_cond, load=_load, attempts=30)
 CAMPAIGN_GAP_S = SEQUENCE_GAP_S + 60     # every attempt ends with the same-session ACK
+SERIES_ATTEMPTS = {"KIT": 10, "PILOT": 10, "P1": 30}
 
-TEST_CHOICES = [SEQUENCE_TEST, CALIBRATION_TEST, *CAMPAIGN_TESTS, *MERCURY_TESTS]
+# Blocks (alpha.5): every remaining run of one stage for the modem in use, with one RUN per
+# PC. The plan is fixed; each PC skips the attempts it has already completed for this arm,
+# so pressing RUN again resumes a stopped block. The simulator follows PC B's announcements.
+BLOCK_PILOT = "BLOCK  Pilot for this modem: Good and Poor, 200 B, 10 attempts each"
+BLOCK_CAMPAIGN = "BLOCK  Campaign for this modem: the 6 P1 cells, 30 attempts each"
+BLOCK_REPEAT = "BLOCK  Repeat missing and not-counted attempts (from the last cross-check)"
+BLOCK_TESTS = {BLOCK_PILOT: "pilot", BLOCK_CAMPAIGN: "campaign", BLOCK_REPEAT: "repeat"}
+BLOCK_CELLS = {
+    "pilot": [("PILOT", "good", "200B"), ("PILOT", "poor", "200B")],
+    "campaign": [("P1", cond, load) for cond in CAMPAIGN_CONDITIONS for load in CAMPAIGN_LOADS],
+}
+
+TEST_CHOICES = [SEQUENCE_TEST, CALIBRATION_TEST, *BLOCK_TESTS, *CAMPAIGN_TESTS, *MERCURY_TESTS]
 SEQUENCE_LABEL = f"Start at step (1–{len(SEQUENCE)}):"
 SEQUENCE_HINT = ("Normally 1. Use a later step only to finish a stopped sequence; "
                  "use the same step on PC A and PC B.")
@@ -241,6 +254,27 @@ def campaign_commands(role: str, test_name: str, start: int = 1) -> list[list[st
     return [command]
 
 
+def is_block(test_name: str) -> bool:
+    return test_name in BLOCK_TESTS
+
+
+def block_commands(role: str, test_name: str) -> list[list[str]]:
+    mode = "send" if role == "A" else "listen"
+    command = ["smoke_sequence.py", mode, "--block", BLOCK_TESTS[test_name]]
+    if mode == "send":
+        command += ["--gap-s", f"{SEQUENCE_GAP_S:g}"]
+    return [command]
+
+
+def block_label(kind: str) -> str:
+    if kind == "repeat":
+        return "the missing and not-counted attempts of this modem (from the last cross-check)"
+    cells = BLOCK_CELLS[kind]
+    total = sum(SERIES_ATTEMPTS[s] for s, _c, _l in cells)
+    return (f"the {kind} block, {len(cells)} cell(s), {total} attempts: "
+            + ", ".join(f"{s}-{c}-{l}" for s, c, l in cells))
+
+
 def is_calibration(test_name: str) -> bool:
     return test_name == CALIBRATION_TEST
 
@@ -258,6 +292,8 @@ def test_tag(test_name: str, repetition: int) -> str:
         return sequence_label(repetition)
     if is_calibration(test_name):
         return "the bench calibration"
+    if is_block(test_name):
+        return block_label(BLOCK_TESTS[test_name])
     if is_campaign(test_name):
         cell = CAMPAIGN_TESTS[test_name]
         return (f"the Phase 1 cell {campaign_tag(cell['condition'], cell['load'], repetition, cell['series'])[:-3]}, "
@@ -376,6 +412,21 @@ def summarize_sequence(report: dict) -> tuple[str, str]:
     """Summarise one PC's run of the full sequence."""
     side = "SENDER" if report.get("mode") == "send" else "RECEIVER"
     done, planned = report.get("completed_steps", 0), report.get("planned_steps", 0)
+    block = report.get("block")
+    if block:
+        run = len(report.get("steps") or [])
+        skipped = report.get("skipped_done", 0)
+        zip_note = f" Results ZIP: {report['zip']}." if report.get("zip") else ""
+        if report.get("outcome") == "stopped":
+            return (f"BLOCK {block['kind'].upper()} STOPPED ({side}): {report.get('stop_reason')} "
+                    f"{run} attempt(s) run. Fix the bench, then press RUN again on PC B and PC A: the "
+                    f"block resumes where it stopped.{zip_note}", "red")
+        if report.get("outcome") == "nothing_to_do":
+            return (f"BLOCK {block['kind'].upper()} ({side}): nothing left to run for {block.get('arm')} "
+                    f"({skipped} attempt(s) already done).", "green")
+        return (f"BLOCK {block['kind'].upper()} FINISHED ({side}, {block.get('arm')}): {run} attempt(s) run, "
+                f"{skipped} already done before.{zip_note} Next: exchange the ZIPs and cross-check on both "
+                "PCs.", "orange")
     cell = report.get("campaign")
     if cell:
         return (f"CELL {cell.get('series', 'P1')} {cell['condition']} {cell['load']} FINISHED ({side}): {len(report.get('steps') or [])} "
