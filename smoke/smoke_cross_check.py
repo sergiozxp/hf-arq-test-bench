@@ -78,6 +78,9 @@ def pair_mismatches(em: dict, rx: dict) -> list[str]:
             continue
         if a != b:
             reasons.append(f"different {label}: {a} / {b}")
+    a_bin, b_bin = em.get("modem_binary_sha256"), rx.get("modem_binary_sha256")
+    if a_bin and b_bin and a_bin != b_bin:
+        reasons.append(f"different modem binaries: {a_bin[:12]}… / {b_bin[:12]}… (same version on both PCs)")
     if em.get("condition") != rx.get("condition"):
         reasons.append(f"different channel condition: {em.get('condition')} / {rx.get('condition')}")
     if bool(em.get("ack_mode")) != bool(rx.get("ack_mode")):

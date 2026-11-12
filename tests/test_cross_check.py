@@ -50,6 +50,9 @@ check(cc.cross_check(sender("H1-1", modem="vara", arm="VARA HF licensed"),
       "a licensed sender against an unlicensed receiver is rejected")
 check(cc.cross_check(sender("H1-1"), receiver("H1-1", mycall="XQ2CG-9"))["outcome"] == "invalid_pair",
       "a receiver with another callsign is rejected")
+check(cc.cross_check(sender("H1-1", modem_binary_sha256="c69b8c81" * 8),
+                     receiver("H1-1", modem_binary_sha256="42b217d9" * 8))["outcome"] == "invalid_pair",
+      "VARA 4.9.0 on one PC and 4.9.1 on the other is rejected (different binaries)")
 check(cc.cross_check(sender("H1-1", size=200), receiver("H1-1", size=1024))["outcome"] == "invalid_pair",
       "different payload sizes are rejected")
 check(cc.cross_check(receiver("H1-1"), sender("H1-1"))["outcome"] == "invalid_pair",

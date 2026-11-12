@@ -26,6 +26,8 @@ DEFAULT_EXE = Path(r"C:\VARA\VARA.exe")
 # Official installer from downloads.winlink.org, recorded on 2026-10-22.
 INSTALLER_ZIP_SHA256 = "5ad7d75c722e4414705dec998c28a711b7567f8568bea75cb84e8aa7c991f48a"
 INSTALLER_EXE_SHA256 = "b7d67fd9fcc2043a49e58ae8202fc699bdb6520255d21aefd258260c767e04bd"
+# VARA.exe installed by that installer (observed on both bench PCs, 2026-10-22).
+VARA_EXE_SHA256 = "c69b8c81f888032a67f3c15fe57ef5ccdabef6eba5be148a5a4d7eb44f00486f"
 PROCESS_NAME = "vara.exe"
 
 
@@ -89,6 +91,10 @@ def inspect(exe: str | Path) -> dict:
 def setting_notes(info: dict, mycall: str = "") -> tuple[list[str], list[str]]:
     """Return (errors, warnings) about the VARA settings for the bench."""
     errors, warnings = [], []
+    if info.get("exe_sha256") and info["exe_sha256"] != VARA_EXE_SHA256:
+        errors.append("This VARA.exe is not VARA HF 4.9.0 (SHA-256 " + info["exe_sha256"][:12]
+                      + "…, expected c69b8c81…). Both PCs must run the same version: reinstall 4.9.0 "
+                      "from 'VARA HF v4.9.0 setup.zip' and untick the update check.")
     s = info["settings"]
     if s["tcp_command_port"] not in (None, 8300):
         errors.append(f"VARA uses TCP command port {s['tcp_command_port']}; the bench uses 8300.")

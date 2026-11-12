@@ -206,7 +206,15 @@ def base_result(args, cfg, rlog, m) -> dict:
             "bw_when": args.bw_when, "payload_bytes_requested": args.payload_size,
             "ack_mode": bool(getattr(args, "ack", False)),
             "condition": getattr(args, "condition", None),
-            "deadline_s": getattr(args, "deadline_s", None)}
+            "deadline_s": getattr(args, "deadline_s", None),
+            "modem_binary_sha256": modem_binary(cfg, modem)}
+
+
+def modem_binary(cfg: dict, modem: str) -> str | None:
+    """Hash of the modem binary (VARA.exe, or the official Mercury ZIP) for the pairing check."""
+    if modem == "vara":
+        return cfg.get("vara_session", {}).get("exe_sha256") or None
+    return cfg.get("mercury_session", {}).get("zip_sha256") or None
 
 
 def run_session_commands(cmd, profile, win, responses, failures, warnings) -> None:
