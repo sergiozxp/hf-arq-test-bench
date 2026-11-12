@@ -42,7 +42,10 @@ SILENCE_S = 30.0             # silence that separates two attempts
 TONE_MIN_S = 3.0             # steady calibration tone needed for a reference
 TONE_PURITY = 0.98           # share of block power in the 1500 Hz bin
 TONE_MIN_DBFS = -40.0
-PEAK_TOLERANCE_DB = 1.0
+PEAK_TOLERANCE_DB = 1.0       # "peak" SNR reference only (secondary, PEP-limited profile)
+PEAK_CEILING_DBFS = -3.0      # safety: a modem's peak at the simulator input must stay below this
+ARMS = ("Mercury 1.9.19", "VARA HF unlicensed", "VARA HF licensed")
+SNR_REFERENCES = ("rms", "peak")
 STATUS_EVERY_S = 0.5
 CHANNELS = ("A->B", "B->A")  # input/output L, R
 
@@ -65,6 +68,17 @@ def dbfs_peak(a: float) -> float | None:
 
 def reference_path(results: Path) -> Path:
     return results / "simulator" / "reference.json"
+
+
+def modem_power_path(results: Path) -> Path:
+    return results / "simulator" / "modem_power.json"
+
+
+def load_modem_power(results: Path) -> dict:
+    try:
+        return json.loads(modem_power_path(results).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def load_reference(results: Path) -> dict | None:
@@ -99,17 +113,36 @@ class DirectionStats:
 class SimulatorCore:
     """Hardware-independent processing; process() is called once per audio block."""
 
-    def __init__(self, mode: str, reference: dict | None, first_attempt: int = 1, emit=print):
+    def __init__(self, mode: str, reference: dict | None, first_attempt: int = 1, emit=print,
+                 snr_reference: str = "rms", arm: str | None = None, modem_power: dict | None = None):
+        """snr_reference 'rms' (primary): noise from the arm's measured RMS power per direction,
+        fixed for the run. 'peak' (secondary, PEP-limited): noise from the calibration tone."""
         if mode != "transparent" and (mode not in cm.CONDITIONS or reference is None):
             raise ValueError("a channel mode needs a known condition and a reference from the calibration")
+        if snr_reference not in SNR_REFERENCES:
+            raise ValueError(f"unknown SNR reference {snr_reference}")
+        power = (modem_power or {}).get(arm or "", {})
+        if mode != "transparent" and snr_reference == "rms" and not all(d in power for d in CHANNELS):
+            raise ValueError(f"no RMS power reference for '{arm}': run its Transparent smoke sequence and "
+                             "save it as the arm's power reference")
         self.mode, self.reference, self.emit = mode, reference, emit
+        self.snr_reference, self.arm = snr_reference, arm
+        tone_refs = (reference or {}).get("directions", {})
+        self.signal_ref = {d: (power[d]["p_rms"] if snr_reference == "rms" and d in power
+                               else tone_refs.get(d, {}).get("p_ref", cm.reference_power()))
+                           for d in CHANNELS}
+        self.noise_power = ({d: self.signal_ref[d] / 10 ** (cm.CONDITIONS[mode].snr_db / 10) for d in CHANNELS}
+                            if mode != "transparent" else {})
+        self.run_power = {d: [0.0, 0] for d in CHANNELS}     # completed attempts without the CAL tone
+        # The arm's power reference is its RMS in the first modem attempt of a Transparent run
+        # (the E0-1 16 B test: connection and a short transfer at the modem's starting mode).
+        self.base_power: dict[str, list] | None = None
+        self.attempt_tone = False
         self.attempt = first_attempt - 1
         self.started = False
         self.samples = 0
         self.last_active = -1e9
-        self.paths = {d: cm.ChannelPath(mode, d, (reference or {}).get("directions", {}).get(d, {})
-                                        .get("p_ref", cm.reference_power()), first_attempt)
-                      for d in CHANNELS}
+        self.paths = {d: cm.ChannelPath(mode, d, self.signal_ref[d], first_attempt) for d in CHANNELS}
         self.stats = {d: DirectionStats() for d in CHANNELS}
         self.xruns = {"input_overflow": 0, "output_underflow": 0}
         self.attempt_xruns = dict(self.xruns)
@@ -128,9 +161,11 @@ class SimulatorCore:
             self.paths[d].reset(self.attempt)
             self.stats[d] = DirectionStats()
         self.attempt_xruns = {k: 0 for k in self.xruns}
+        self.attempt_tone = False
         self.attempt_start = utc_now()
         self.emit({"event": "attempt_start", "attempt": self.attempt, "t_utc": self.attempt_start,
-                   "stream_s": round(t_s, 3), "mode": self.mode,
+                   "stream_s": round(t_s, 3), "mode": self.mode, "arm": self.arm,
+                   "snr_reference": self.snr_reference,
                    "seeds": None if self.mode == "transparent" else
                    {d: [cm.SEED_ROOT, cm.CONDITIONS[self.mode].code, cm.DIRECTIONS[d], self.attempt]
                     for d in CHANNELS}})
@@ -148,13 +183,28 @@ class SimulatorCore:
         if any(self.attempt_xruns.values()):
             problems.append(f"audio dropouts {self.attempt_xruns}")
         for d in CHANNELS:
+            st = self.stats[d]
+            if not self.attempt_tone and st.active_blocks:
+                self.run_power[d][0] += st.active_power
+                self.run_power[d][1] += st.active_blocks
             if summary[d]["output_clipped_samples"]:
                 problems.append(f"{d}: {summary[d]['output_clipped_samples']} clipped output samples")
+            peak = summary[d]["input_peak_dbfs"]
+            if peak is not None and peak > PEAK_CEILING_DBFS and summary[d]["active_s"] > 0.2:
+                problems.append(f"{d}: modem peak {peak:.2f} dBFS above the {PEAK_CEILING_DBFS:.0f} dBFS ceiling")
             dev = summary[d].get("peak_vs_reference_db")
-            if dev is not None and abs(dev) > PEAK_TOLERANCE_DB and summary[d]["active_s"] > 1:
+            if (self.snr_reference == "peak" and dev is not None and abs(dev) > PEAK_TOLERANCE_DB
+                    and summary[d]["active_s"] > 1):
                 problems.append(f"{d}: modem peak {dev:+.2f} dB from the reference")
+            if self.noise_power and st.active_blocks:
+                mean = st.active_power / st.active_blocks
+                summary[d]["effective_snr_db"] = round(10 * math.log10(mean / self.noise_power[d]), 2)
+        if self.base_power is None and not self.attempt_tone and self.stats["A->B"].active_blocks:
+            self.base_power = {d: [self.stats[d].active_power, self.stats[d].active_blocks] for d in CHANNELS}
         self.emit({"event": "attempt_end", "attempt": self.attempt, "t_utc": utc_now(),
-                   "started_utc": self.attempt_start, "mode": self.mode, "directions": summary,
+                   "started_utc": self.attempt_start, "mode": self.mode, "arm": self.arm,
+                   "snr_reference": self.snr_reference, "calibration_tone": self.attempt_tone,
+                   "directions": summary,
                    "xruns": dict(self.attempt_xruns), "valid": not problems, "problems": problems})
 
     # -- reference tone (transparent mode)
@@ -184,6 +234,7 @@ class SimulatorCore:
                  "tone_s": round(len(run) * cm.BLOCK / cm.FS, 2), "t_utc": utc_now()}
         self.references_found[d] = found
         self.reference_count += 1
+        self.attempt_tone = True
         self.emit({"event": "reference", "direction": d, **found})
 
     # -- one block
@@ -227,7 +278,23 @@ class SimulatorCore:
 
     def status(self) -> dict:
         refs = self._refs()
-        return {"t_utc": utc_now(), "mode": self.mode, "attempt": self.attempt if self.started else None,
+        run = {}
+        for d in CHANNELS:
+            total, blocks = self.run_power[d]
+            if not self.attempt_tone and self.stats[d].active_blocks:
+                total, blocks = total + self.stats[d].active_power, blocks + self.stats[d].active_blocks
+            run[d] = {"p_rms": total / blocks if blocks else None, "active_s": round(blocks * cm.BLOCK / cm.FS, 1),
+                      "rms_dbfs": dbfs_power(total / blocks) if blocks else None}
+        base_src = self.base_power
+        if base_src is None and not self.attempt_tone and self.stats["A->B"].active_blocks:
+            base_src = {d: [self.stats[d].active_power, self.stats[d].active_blocks] for d in CHANNELS}
+        base = {d: {"p_rms": (base_src[d][0] / base_src[d][1]) if base_src and base_src[d][1] else None,
+                    "active_s": round(base_src[d][1] * cm.BLOCK / cm.FS, 1) if base_src else 0.0,
+                    "rms_dbfs": dbfs_power(base_src[d][0] / base_src[d][1])
+                    if base_src and base_src[d][1] else None} for d in CHANNELS}
+        return {"t_utc": utc_now(), "mode": self.mode, "arm": self.arm, "snr_reference": self.snr_reference,
+                "run_power": run, "base_power": base,
+                "attempt": self.attempt if self.started else None,
                 "seconds_since_audio": round(self.samples / cm.FS - self.last_active, 1)
                 if self.started else None,
                 "xruns_total": dict(self.xruns),
@@ -382,6 +449,9 @@ def main() -> int:
         p.add_argument("--mode", required=True, choices=["transparent", *cm.CONDITIONS])
         p.add_argument("--first-attempt", type=int, default=1)
         p.add_argument("--results", default="results")
+        p.add_argument("--snr-reference", choices=SNR_REFERENCES, default="rms",
+                       help="rms: equal RMS SNR per arm (primary); peak: PEP-limited profile (secondary)")
+        p.add_argument("--arm", choices=ARMS, default=None, help="the arm under test (its RMS power reference)")
         if name == "run":
             p.add_argument("--input", required=True)
             p.add_argument("--output", required=True)
@@ -401,12 +471,21 @@ def main() -> int:
         return 2
     folder = results / "simulator" / f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}_{args.mode}"
     log = Log(folder)
-    core = SimulatorCore(args.mode, reference, args.first_attempt, emit=log.emit)
+    try:
+        core = SimulatorCore(args.mode, reference, args.first_attempt, emit=log.emit,
+                             snr_reference=args.snr_reference, arm=args.arm,
+                             modem_power=load_modem_power(results))
+    except ValueError as error:
+        print(f"NO POWER REFERENCE: {error}", flush=True)
+        log.emit({"event": "error", "detail": str(error), "t_utc": utc_now()})
+        log.close()
+        return 2
     devices = {"input": getattr(args, "input", args.__dict__.get("wav_in")),
                "output": getattr(args, "output", args.__dict__.get("wav_out"))}
     log.emit({"event": "start", "t_utc": utc_now(), "mode": args.mode, "first_attempt": args.first_attempt,
               "devices": devices, "reference": reference, "block": cm.BLOCK, "rate": cm.FS,
-              "output_gain_db": cm.OUTPUT_GAIN_DB,
+              "output_gain_db": cm.OUTPUT_GAIN_DB, "snr_reference": args.snr_reference, "arm": args.arm,
+              "modem_power": load_modem_power(results).get(args.arm or ""),
               "condition": None if args.mode == "transparent" else cm.CONDITIONS[args.mode].__dict__})
     print(f"Simulator log: {folder}", flush=True)
     try:

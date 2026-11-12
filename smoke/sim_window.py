@@ -47,18 +47,31 @@ class SimulatorWindow(tk.Toplevel):
         self.first = tk.IntVar(value=1)
         ttk.Spinbox(frame, from_=1, to=30, textvariable=self.first, width=4, state="readonly").grid(
             row=4, column=1, sticky="w")
+        ttk.Label(frame, text="Arm (modem under test):").grid(row=5, column=0, sticky="w", **pad)
+        self.arm = tk.StringVar(value=control.ARMS[0])
+        ttk.Combobox(frame, textvariable=self.arm, values=list(control.ARMS), width=48,
+                     state="readonly").grid(row=5, column=1, sticky="w")
+        self.arm.trace_add("write", lambda *_: self._show_reference())
+        ttk.Label(frame, text="SNR reference:").grid(row=6, column=0, sticky="w", **pad)
+        self.snr_ref = tk.StringVar(value=next(iter(control.SNR_REFERENCES)))
+        ttk.Combobox(frame, textvariable=self.snr_ref, values=list(control.SNR_REFERENCES), width=48,
+                     state="readonly").grid(row=6, column=1, sticky="w")
         buttons = ttk.Frame(frame)
-        buttons.grid(row=5, column=0, columnspan=3, sticky="w", **pad)
+        buttons.grid(row=7, column=0, columnspan=3, sticky="w", **pad)
         self.start_button = tk.Button(buttons, text="Start simulator", font=("Segoe UI", 11, "bold"),
                                       bg="#1f5fbf", fg="white", command=self._start, padx=16)
         self.start_button.pack(side="left", padx=4)
         self.stop_button = ttk.Button(buttons, text="Stop simulator", command=self._stop, state="disabled")
         self.stop_button.pack(side="left", padx=4)
+        ttk.Button(buttons, text="Save as power reference for this arm",
+                   command=self._save_power).pack(side="left", padx=12)
         self.reference_label = tk.Label(frame, text="", wraplength=640, justify="left", anchor="w")
-        self.reference_label.grid(row=6, column=0, columnspan=3, sticky="w", **pad)
+        self.reference_label.grid(row=8, column=0, columnspan=3, sticky="w", **pad)
+        self.power_label = tk.Label(frame, text="", wraplength=640, justify="left", anchor="w")
+        self.power_label.grid(row=9, column=0, columnspan=3, sticky="w", **pad)
         self.status_label = tk.Label(frame, text="Simulator not running.", font=("Segoe UI", 11, "bold"),
                                      wraplength=640, justify="left", anchor="w", fg=COLORS["gray"])
-        self.status_label.grid(row=7, column=0, columnspan=3, sticky="w", **pad)
+        self.status_label.grid(row=10, column=0, columnspan=3, sticky="w", **pad)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._show_reference()
         self._detect()
@@ -105,12 +118,18 @@ class SimulatorWindow(tk.Toplevel):
                                        "UCA-S. Use it anyway?", parent=self):
                 return
         mode = control.MODES[self.mode.get()]
+        snr_reference = control.SNR_REFERENCES[self.snr_ref.get()]
         if mode != "transparent" and control.read_reference(self.results) is None:
             messagebox.showwarning("No reference", control.describe_reference(None)[0], parent=self)
             return
+        if mode != "transparent" and snr_reference == "rms" and \
+                self.arm.get() not in control.read_modem_power(self.results):
+            messagebox.showwarning("No power reference",
+                                   control.describe_power({}, self.arm.get())[0], parent=self)
+            return
         self.console.parent.mkdir(parents=True, exist_ok=True)
         command = control.run_command(self.input_choice.get(), self.output_choice.get(), mode,
-                                      int(self.first.get()))
+                                      int(self.first.get()), arm=self.arm.get(), snr_reference=snr_reference)
         handle = open(self.console, "w", encoding="utf-8")
         env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         self.process = subprocess.Popen(self.process_command(command), cwd=str(self.here), env=env,
@@ -164,6 +183,23 @@ class SimulatorWindow(tk.Toplevel):
     def _show_reference(self) -> None:
         text, color = control.describe_reference(control.read_reference(self.results))
         self.reference_label.configure(text=text, fg=COLORS[color])
+        text, color = control.describe_power(control.read_modem_power(self.results), self.arm.get())
+        self.power_label.configure(text=text, fg=COLORS[color])
+
+    def _save_power(self) -> None:
+        arm = self.arm.get()
+        if not messagebox.askyesno("Power reference", f"Save the RMS power measured in this Transparent run "
+                                   f"as the reference for {arm}? Do it after the arm's smoke sequence.",
+                                   parent=self):
+            return
+        try:
+            text = control.save_modem_power(self.results, arm, control.read_status(self.folder),
+                                            source=str(self.folder or ""))
+        except ValueError as error:
+            messagebox.showwarning("Power reference not saved", str(error), parent=self)
+            return
+        self._show_reference()
+        messagebox.showinfo("Power reference saved", text, parent=self)
 
     def _set_status(self, text: str, color: str) -> None:
         self.status_label.configure(text=text, fg=COLORS.get(color, COLORS["gray"]))

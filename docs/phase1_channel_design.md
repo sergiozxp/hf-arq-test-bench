@@ -39,7 +39,7 @@ and output of UCA-S share one clock, so the simulator needs no drift compensatio
 Two-path Watterson model with additive Gaussian noise, with the mid-latitude
 reference values of ITU-R F.1487 (Annex 3):
 
-| Condition | Differential delay | Frequency spread (2 sigma) | SNR (3 kHz, peak-referred) |
+| Condition | Differential delay | Frequency spread (2 sigma) | SNR (3 kHz, RMS) |
 |---|---:|---:|---:|
 | Good | 0.5 ms | 0.1 Hz | +10 dB |
 | Moderate | 1 ms | 0.5 Hz | +3 dB |
@@ -55,21 +55,34 @@ reference values of ITU-R F.1487 (Annex 3):
   gains to the real signal directly would not reproduce fading.
 - **Noise.** Gaussian, band-limited to 300-3300 Hz (3 kHz), added after the fading.
   F.1487 does not fix a reference bandwidth for SNR; this protocol defines it as 3 kHz.
-- **SNR reference (peak-referred).** SNR = P_ref / N, where N is the noise power in the
-  3 kHz band and P_ref is the power of a sine whose peak equals the modems' transmit
-  peak. Every modem transmits with the same digital peak (-6 dBFS on this bench), so
-  one noise level serves all arms. This compares the modems as a radio amateur uses
-  them: with the same transmitter, limited by its peak power. A modem with a lower
-  peak-to-average ratio delivers more mean power at the same peak; the simulator
-  logs each modem's mean power so that readers can convert to an average-power SNR.
-- **Reference measurement.** P_ref is measured once per direction from the bench
-  calibration tone (1500 Hz, -6 dBFS peak) as it arrives at the simulator input, with
-  the simulator in transparent mode. Gain and noise level then stay fixed for the
-  campaign; they are never adjusted during a transfer.
+- **SNR reference (RMS, primary).** SNR = P_rms / N, where N is the noise power in the
+  3 kHz band and P_rms the RMS power of the arm's signal while it transmits, measured
+  per direction at the simulator input. Every arm then receives the same SNR whatever
+  its peak-to-average ratio. P_rms is measured once per arm, in the first test (E0-1
+  16 B: connection and a short transfer at the modem's starting mode) of its smoke
+  sequence through the transparent simulator, and saved; the noise level stays fixed
+  for the campaign and is never adjusted during a transfer. The starting mode is the
+  same for free and licensed VARA, so both get the same SNR there. Licensed VARA's RMS
+  falls by up to about 3 dB at its fastest levels (observed: -1.0 dB at level 4, -4.1 dB
+  in the 10 KiB test, relative to the tone); that is part of the modem's behaviour and
+  is kept, not compensated. Each attempt records its effective RMS SNR, its peak and its
+  RMS, and the cell report gives the median effective SNR.
+- **Why not the peak.** The first transparent runs (2026-11-12) showed that licensed
+  VARA's peak rises with its speed level: with the Drive that put free VARA (level 4)
+  at the tone's peak, licensed VARA reached +4 to +5.5 dB above it at levels 8-13,
+  while its RMS stayed close. A peak-referred SNR would give the same modem a
+  different SNR at each level, and lowering only its Drive would cost it about 4 dB of
+  mean power against free VARA.
+- **Safety ceiling.** Each arm's Drive is set so that its highest peak at the simulator
+  input stays at or below -3 dBFS (checked with its fastest mode, the 10 KiB test). An
+  attempt above the ceiling is not counted. With the RMS reference, the Drive does not
+  change the SNR.
+- **Secondary profile (PEP-limited).** SNR referred to the power of a sine at the
+  calibration tone's peak (P_ref, measured once per direction with the tone in
+  transparent mode), one noise level for all arms, every arm's peak within 1 dB of the
+  tone's peak. It shows the practical case of a transmitter limited by its peak power.
 - **Output level.** The simulator output is 12 dB below its input in every mode,
   including transparent, so that signal plus noise at -3 dB SNR does not clip.
-- **Equal peaks.** VARA's Drive level is set so that its peak at the simulator input
-  equals the calibration tone's peak (within 1 dB), as Mercury's already does.
 
 ## 3. Seeds and traces
 
@@ -100,7 +113,8 @@ same-session ACK (E0-3 procedure).
   attempt). Delivery time = from A's CONNECT to A's verified ACK.
 - **Not counted, repeated with the same trace:** audio dropouts (input overflow or
   output underflow) in the simulator during the attempt; clipping at the simulator
-  output; a modem peak more than 1 dB from the reference; an infrastructure or
+  output; a modem peak above -3 dBFS (in the secondary profile, more than 1 dB from the
+  tone's peak); noise set for another arm; an infrastructure or
   procedure fault as defined in protocol v5.1-5.2.
 
 ## 5. Validation before measuring
@@ -116,7 +130,8 @@ same-session ACK (E0-3 procedure).
    records P_ref in the same run.
 3. **Complete smoke sequence** (9 tests) for the three arms through the transparent
    simulator.
-4. **Peak check:** each modem's peak at the simulator input within 1 dB of P_ref's peak.
+4. **Power reference and ceiling:** each arm's RMS power saved from its transparent
+   sequence, and its highest peak at or below -3 dBFS (Drive adjusted if needed).
 5. **Pilot:** 10 attempts of 200 B per condition, exploratory, to check that no
    condition is 0 % or 100 % for all three arms. If one is, its SNR is changed once,
    with the reason recorded before the campaign. After that nothing changes.

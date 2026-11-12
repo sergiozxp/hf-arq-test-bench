@@ -42,23 +42,29 @@ Text is only a secondary sensitivity test and must declare any compression.
 Phase 1 uses BW500, the two binary loads and three two-path Watterson channels with
 band-limited Gaussian noise (ITU-R F.1487 mid-latitude reference values):
 
-| Condition | Differential delay | Frequency spread (2 sigma) | SNR (3 kHz, peak-referred) |
+| Condition | Differential delay | Frequency spread (2 sigma) | SNR (3 kHz, RMS) |
 |---|---:|---:|---:|
 | Good | 0.5 ms | 0.1 Hz | +10 dB |
 | Moderate | 1 ms | 0.5 Hz | +3 dB |
 | Poor | 2 ms | 1 Hz | -3 dB |
 
 There are 3 x 3 x 2 = 18 primary cells of 30 attempts, presented as nine rows with
-the two loads side by side. SNR is the power of a sine with the modems' common
-transmit peak over the noise power in 3 kHz; the reference is measured once with
-the calibration tone and the noise level then stays fixed. Fading and noise come
+the two loads side by side. SNR is the modem's RMS signal power over the noise power
+in 3 kHz, so every arm receives the same SNR whatever its peak-to-average ratio. The
+RMS power of each arm and direction is measured once, in the first test (E0-1 16 B,
+the modem's starting mode) of its smoke sequence through the transparent simulator,
+and the noise level then stays fixed for the campaign; it is never adjusted during a
+transfer. Each attempt records its effective RMS SNR. Each
+arm's Drive is set so that its highest peak stays at or below -3 dBFS at the
+simulator input (a safety ceiling against clipping, not a comparison rule). A
+secondary, PEP-limited profile refers SNR to the calibration tone's peak instead. Fading and noise come
 from published seeds per condition, direction and attempt number, the same for
 every arm and bench. A 10-attempt pilot per condition (exploratory) may change one
 condition's SNR once, before the campaign, with the reason recorded.
 
 Each attempt has a deadline from A's CONNECT: 10 min for 200 B, 60 min for 10 KiB.
-An attempt with simulator dropouts, output clipping, a modem peak more than 1 dB
-from the reference, or an infrastructure or procedure fault is not counted and is
+An attempt with simulator dropouts, output clipping, a modem peak above -3 dBFS, noise
+set for another arm, or an infrastructure or procedure fault is not counted and is
 repeated with the same trace.
 
 The minimum replication kit is the bench calibration plus 200 B in the moderate
@@ -159,7 +165,8 @@ and about 11 dB for data frames on the same clean cable).
 
 - Minimum reproducible bench: two PCs and three UCA222, simulator on PC B.
 - Phase 1 channel fixed: three Watterson conditions with F.1487 delays and spreads,
-  SNR in 3 kHz referred to the common transmit peak, published seeds.
+  SNR in 3 kHz referred to each arm's RMS power (primary; a peak-referred PEP-limited
+  profile is secondary), -3 dBFS peak ceiling, published seeds.
 - Attempt deadlines, validity rules for the simulator (dropouts, clipping, peak).
 - Reporting simplified to Wilson interval and median; minimum replication kit.
 - Modem versions are not fixed: same binary on both PCs and throughout a campaign,

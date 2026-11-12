@@ -48,17 +48,25 @@ Untick "Allow VARA check for updates via internet" on both PCs so the version do
 not change during the campaign. The cross-check rejects pairs from different
 binaries.
 
-## 4. Equal peaks
+## 4. Power reference and peak ceiling (each arm)
 
-During the smoke test the simulator shows each direction's "peak … dB vs reference".
-Mercury should read within ±1 dB. For VARA, adjust its **Drive** level on each PC
-until its peak reads within ±1 dB, and record the Drive value. An attempt with a peak
-outside ±1 dB is not counted.
+1. Before an arm's transparent smoke sequence, stop and start the simulator again
+   (Transparent), and choose that arm in **Arm**.
+2. During the sequence the status line shows each direction's peak in dBFS and the
+   RMS measured so far. The peak must stay at or below **-3 dBFS**; if it does not,
+   lower the arm's Drive (VARA: Settings > SoundCard > Drive level) on the PC that
+   transmits in that direction, and repeat the sequence. Licensed VARA peaks highest
+   in the 10 KiB test; start it at about -7 dB.
+3. When the sequence has finished (and its peaks were within the ceiling), press **Save
+   as power reference for this arm**. It saves the RMS of the sequence's first test
+   (E0-1 16 B, the modem's starting mode); the simulator sets this arm's noise from it.
+4. Record each arm's Drive values; they stay fixed for the campaign.
 
 ## 5. Run a cell
 
-1. In the simulator window choose the condition (Good, Moderate or Poor) and the
-   **first attempt number** (normally 1), and press **Start simulator**.
+1. In the simulator window choose the condition (Good, Moderate or Poor), the **Arm**,
+   **SNR reference: Equal RMS SNR (primary)** and the **first attempt number** (normally
+   1), and press **Start simulator**.
 2. On PC A and PC B choose the same test, for example
    "KIT  Minimum replication kit: Moderate, 200 B, 10 attempts", with the same
    **Start at attempt**.
@@ -75,7 +83,8 @@ PC B and the simulator's first attempt).
 ## Order of work
 
 1. Bench validation: CAL through the simulator, the 9-test sequence in Transparent
-   for Mercury, VARA free and VARA licensed (VARA Drive set for equal peaks), then the
+   for Mercury, VARA free and VARA licensed (power reference saved for each, peaks at
+   or below -3 dBFS), then the
    kit (Moderate, 200 B, 10 attempts) for the three arms.
 2. Pilot (exploratory): "PILOT  Good, 200 B, 10 attempts" and "PILOT  Poor, …" for the
    three arms; the kit covers Moderate. If a condition is 0 % or 100 % for all three
@@ -85,9 +94,9 @@ PC B and the simulator's first attempt).
 ## What is not counted
 
 An attempt is not counted, and is repeated later with the same attempt number, when
-the simulator reports an audio dropout, clipping at its output, a modem peak more
-than 1 dB from the reference, no simulator attempt at that time, another condition
-or another attempt number; or when the smoke rules mark it as an infrastructure or
+the simulator reports an audio dropout, clipping at its output, a modem peak above
+-3 dBFS, noise set for another arm, no simulator attempt at that time, another
+condition or another attempt number; or when the smoke rules mark it as an infrastructure or
 procedure fault. The cell report lists these attempts with their reason.
 
 ## Minimum replication kit

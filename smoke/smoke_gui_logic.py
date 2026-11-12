@@ -405,6 +405,8 @@ def summarize_report(report: dict) -> tuple[str, str]:
             rate = "—" if c["success_rate"] is None else f"{c['success_rate'] * 100:.0f} %"
             interval = "" if low is None else f" (95 % {low * 100:.0f}–{high * 100:.0f} %)"
             med = "" if c["median_delivery_s"] is None else f", median {c['median_delivery_s']:.0f} s"
+            if c.get("median_effective_snr_db") is not None:
+                med += f", SNR {c['median_effective_snr_db']:+.1f} dB"
             extra = f", {len(c['not_counted'])} not counted" if c["not_counted"] else ""
             lines.append(f"{c.get('series', 'P1')} · {c['arm']} · {c['condition']} · {c['load']}: "
                          f"{c['successes']}/{c['counted']} = "

@@ -189,6 +189,8 @@ sims = [{"attempt": k, "mode": "moderate", "start": t0 + timedelta(minutes=3 * k
          "problems": [] if k != 2 else ["audio dropouts {'input_overflow': 1}"], "pc": "this PC", "log": "x"}
         for k in (1, 2, 3, 4)]
 sims[3]["mode"] = "poor"
+for sim_row in sims:
+    sim_row.update(arm="Mercury 1.9.19", snr_reference="rms", effective_snr_db={"A->B": 3.1, "B->A": 2.9})
 rows = []
 for k, ok in ((1, True), (2, True), (3, False), (4, True)):
     s_run, em, rx = p1_run(k, ok, deadline=not ok)
@@ -211,4 +213,11 @@ check(len(cells) == 1 and (c["attempts"], c["counted"], c["successes"], c["failu
 mixed = [dict(rows[0], modem_binary_sha256="a" * 64), dict(rows[2], modem_binary_sha256="b" * 64)]
 check(cc.cell_table(mixed)[0].get("warning", "").startswith("the modem binary changed"),
       "a cell whose modem version changed is flagged")
+check(cells[0]["median_effective_snr_db"] == 3.1, "the cell reports the median effective RMS SNR")
+other_arm = [dict(x, arm="VARA HF licensed") for x in sims]
+s_run, em, rx = p1_run(1)
+row = cc.cross_check(em, rx)
+cc.attach_simulator(row, s_run, {"start": s_run["start"] - timedelta(seconds=30)}, other_arm)
+check(row["outcome"] == "not_counted" and "noise was set for VARA HF licensed" in row["not_counted_reasons"][0],
+      "noise set for another arm makes the attempt not counted")
 print("ALL CROSS-CHECK TESTS PASSED")

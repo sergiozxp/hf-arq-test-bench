@@ -246,8 +246,11 @@ def find_simulator_attempts(root: Path, origin: str) -> list[dict]:
             continue
         for key, start in starts.items():
             end = ends.get(key)
+            directions = (end or {}).get("directions") or {}
             attempts.append({"log": log.parent.name, "pc": origin, "attempt": start["attempt"],
-                             "mode": start.get("mode"),
+                             "mode": start.get("mode"), "arm": start.get("arm"),
+                             "snr_reference": start.get("snr_reference"),
+                             "effective_snr_db": {d: v.get("effective_snr_db") for d, v in directions.items()},
                              "start": datetime.fromisoformat(start["t_utc"]),
                              "valid": bool(end and end.get("valid")),
                              "problems": (end or {}).get("problems") or
@@ -295,6 +298,10 @@ def attach_simulator(row: dict, sender: dict, receiver: dict, sim_attempts: list
         row["simulator"] = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in sim.items()}
         if sim["mode"] != condition:
             reasons.append(f"the simulator ran '{sim['mode']}', the run is '{condition}'")
+        row["snr_reference"] = sim.get("snr_reference")
+        row["effective_snr_db"] = (sim.get("effective_snr_db") or {}).get("A->B")
+        if sim.get("snr_reference") == "rms" and sim.get("arm") and sim["arm"] != row.get("arm"):
+            reasons.append(f"the simulator's noise was set for {sim['arm']}, the run is {row.get('arm')}")
         if sim["attempt"] != attempt:
             reasons.append(f"the simulator used attempt {sim['attempt']}'s trace for attempt {attempt}")
         if not sim["valid"]:
@@ -314,12 +321,14 @@ def cell_table(rows: list[dict]) -> list[dict]:
         cell = cells.setdefault(key, {"series": key[0], "arm": key[1], "condition": key[2], "load": key[3],
                                       "attempts": 0,
                                       "counted": 0, "successes": 0, "failures": 0, "deadline_reached": 0,
-                                      "not_counted": [], "times": [], "binaries": set()})
+                                      "not_counted": [], "times": [], "binaries": set(), "snrs": []})
         cell["attempts"] += 1
         if row.get("modem_binary_sha256"):
             cell["binaries"].add(row["modem_binary_sha256"])
         if row["outcome"] in ("passed", "failed"):
             cell["counted"] += 1
+            if row.get("effective_snr_db") is not None:
+                cell["snrs"].append(row["effective_snr_db"])
             if row["outcome"] == "passed":
                 cell["successes"] += 1
                 if row.get("delivery_time_s") is not None:
@@ -335,6 +344,8 @@ def cell_table(rows: list[dict]) -> list[dict]:
         low, high = wilson(cell["successes"], cell["counted"])
         times = cell.pop("times")
         cell["modem_binaries"] = sorted(cell.pop("binaries"))
+        snrs = cell.pop("snrs")
+        cell["median_effective_snr_db"] = None if not snrs else round(median(snrs), 2)
         if len(cell["modem_binaries"]) > 1:
             cell["warning"] = "the modem binary changed during the cell (version updated?)"
         cell.update(success_rate=round(cell["successes"] / cell["counted"], 4) if cell["counted"] else None,
@@ -430,11 +441,12 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
             writer = csv.writer(handle, delimiter=";")
             writer.writerow(["series", "arm", "condition", "load", "attempts", "counted", "successes", "failures",
                              "deadline_reached", "success_rate", "wilson_low", "wilson_high",
-                             "median_delivery_s", "not_counted"])
+                             "median_delivery_s", "median_effective_snr_db", "not_counted"])
             for c in report["cells"]:
                 writer.writerow([c["series"], c["arm"], c["condition"], c["load"], c["attempts"], c["counted"],
                                  c["successes"], c["failures"], c["deadline_reached"], c["success_rate"],
                                  c["wilson_95"][0], c["wilson_95"][1], c["median_delivery_s"],
+                                 c["median_effective_snr_db"],
                                  len(c["not_counted"])])
     with open(out_dir / "cross_check_report.csv", "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, delimiter=";")

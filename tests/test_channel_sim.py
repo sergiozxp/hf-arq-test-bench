@@ -89,7 +89,7 @@ except ValueError:
 
 # ---------------------------------------------------------------- attempts, seeds and validity
 events = []
-core = sim.SimulatorCore("moderate", reference, first_attempt=4, emit=events.append)
+core = sim.SimulatorCore("moderate", reference, first_attempt=4, emit=events.append, snr_reference="peak")
 a_peak = refs["A->B"]["tone_peak_dbfs"]
 b_peak = refs["B->A"]["tone_peak_dbfs"]
 left = np.concatenate([silence(1), burst(8, a_peak), silence(5), burst(4, a_peak),       # attempt 4
@@ -112,12 +112,12 @@ check(not ends[2]["valid"] and ends[2]["xruns"]["output_underflow"] == 1,
 check("mean_power_vs_reference_db" in ends[0]["directions"]["A->B"],
       "the modem's mean power relative to the reference is recorded")
 check(np.max(np.abs(out)) < 1.0, "no clipping in the moderate condition")
-poor = sim.SimulatorCore("poor", reference, emit=lambda e: None)
+poor = sim.SimulatorCore("poor", reference, emit=lambda e: None, snr_reference="peak")
 check(np.max(np.abs(feed(poor, burst(20, a_peak), burst(20, b_peak)))) < 1.0,
       "no clipping at -3 dB SNR with the modems' peak (the -12 dB output gain leaves headroom)")
 
 # The same input gives the same output (seeds), and the channel actually fades.
-again = sim.SimulatorCore("moderate", reference, first_attempt=4, emit=lambda e: None)
+again = sim.SimulatorCore("moderate", reference, first_attempt=4, emit=lambda e: None, snr_reference="peak")
 check(np.array_equal(feed(again, left, right), out), "a replay gives the same output, sample for sample")
 
 # ---------------------------------------------------------------- command line, offline
@@ -136,6 +136,7 @@ print(run.stdout, run.stderr)
 saved = json.loads((tmp / "results" / "simulator" / "reference.json").read_text(encoding="utf-8"))
 check(set(saved["directions"]) == {"A->B", "B->A"}, "the reference is saved for the channel modes")
 run = subprocess.run([sys.executable, str(ROOT / "smoke" / "channel_sim.py"), "offline", "--mode", "poor",
+                      "--snr-reference", "peak",
                       "--wav-in", str(tmp / "cal.wav"), "--wav-out", str(tmp / "out2.wav"),
                       "--results", str(tmp / "results")], capture_output=True, text=True)
 logs = list((tmp / "results" / "simulator").glob("*_poor/sim_log.jsonl"))
@@ -143,6 +144,7 @@ records = [json.loads(line) for line in logs[0].read_text(encoding="utf-8").spli
 check(run.returncode == 0 and records[0]["event"] == "start" and records[-1]["event"] == "stop",
       "a channel run reads the saved reference and writes its log")
 run = subprocess.run([sys.executable, str(ROOT / "smoke" / "channel_sim.py"), "offline", "--mode", "good",
+                      "--snr-reference", "peak",
                       "--wav-in", str(tmp / "cal.wav"), "--wav-out", str(tmp / "out3.wav"),
                       "--results", str(tmp / "empty")], capture_output=True, text=True)
 check(run.returncode == 2 and "NO REFERENCE" in run.stdout, "without a reference the channel modes refuse to start")
@@ -156,4 +158,42 @@ log.write_status({"x": 2})
 check(json.loads((tmp / "statuslog" / "status.json").read_text(encoding="utf-8")) == {"x": 2},
       "a busy status file is skipped, not fatal, and the next update succeeds")
 log.close()
+
+# ---------------------------------------------------------------- equal RMS SNR (primary)
+arm = "VARA HF licensed"
+try:
+    sim.SimulatorCore("moderate", reference, arm=arm, modem_power={})
+    check(False, "an RMS channel run without the arm's power reference is refused")
+except ValueError:
+    check(True, "an RMS channel run without the arm's power reference is refused")
+# Measure the arm's power in Transparent mode: CAL tone first (excluded), then modem bursts.
+events = []
+tcore = sim.SimulatorCore("transparent", reference, arm=arm, emit=events.append)
+t_left = np.concatenate([silence(1), tone(6, -6.7), silence(35), burst(20, -6.0), silence(35), burst(10, -6.0)])
+t_right = np.concatenate([silence(50), burst(4, -6.4), silence(len(t_left) / FS)])[:len(t_left)]
+feed(tcore, t_left, t_right)
+status = tcore.status()
+check(status["run_power"]["A->B"]["active_s"] >= 29, "the run power excludes the calibration tone")
+check(abs(status["base_power"]["A->B"]["active_s"] - 20) < 1,
+      "the power reference is the first modem attempt (E0-1 16 B), not the whole run")
+tcore.finish()
+check([e for e in events if e["event"] == "attempt_end"][0]["calibration_tone"] is True,
+      "the attempt with the calibration tone is marked")
+import sim_control
+saved_text = sim_control.save_modem_power(tmp, arm, status)
+check(arm in saved_text, "the power reference is saved for the arm")
+power = sim_control.read_modem_power(tmp)
+events = []
+rcore = sim.SimulatorCore("moderate", reference, first_attempt=1, emit=events.append, snr_reference="rms",
+                          arm=arm, modem_power=power)
+r_left = np.concatenate([silence(1), burst(12, -6.0), silence(35), burst(8, -2.0)])
+feed(rcore, r_left, np.concatenate([silence(5), burst(3, -6.4), silence(len(r_left) / FS)])[:len(r_left)])
+rcore.finish()
+ends = [e for e in events if e["event"] == "attempt_end"]
+eff = ends[0]["directions"]["A->B"]["effective_snr_db"]
+check(abs(eff - 3.0) < 0.5, f"the effective RMS SNR equals the condition's SNR ({eff:+.2f} dB vs +3 dB)")
+check(ends[0]["valid"] and ends[0]["arm"] == arm and ends[0]["snr_reference"] == "rms",
+      "a burst 0.5 dB above the tone's peak is fine in RMS mode (no ±1 dB peak rule)")
+check(not ends[1]["valid"] and any("ceiling" in p for p in ends[1]["problems"]),
+      "a peak above -3 dBFS is not counted (safety ceiling)")
 print("ALL SIMULATOR RUNTIME TESTS PASSED")
