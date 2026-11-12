@@ -6,6 +6,12 @@ This protocol compares HF ARQ modems and their native transport interfaces, not
 user applications. The benchmark arms are Mercury 1.9.19, VARA HF unlicensed,
 and VARA HF licensed. Pat and VarAC are out of scope.
 
+**Modem versions.** Any version may be benchmarked, but both PCs must run the same
+binary, and it must not change during a campaign: automatic updates are disabled,
+every result records the binary's SHA-256 and the version the modem reports, the
+cross-check rejects a pair whose PCs ran different binaries, and a cell whose binary
+changed is flagged. Results apply to the recorded version only.
+
 Each arm uses the same Python reference client at both endpoints:
 
     reference client A -> modem A -> simulated audio channel -> modem B -> reference client B
@@ -156,6 +162,8 @@ and about 11 dB for data frames on the same clean cable).
   SNR in 3 kHz referred to the common transmit peak, published seeds.
 - Attempt deadlines, validity rules for the simulator (dropouts, clipping, peak).
 - Reporting simplified to Wilson interval and median; minimum replication kit.
+- Modem versions are not fixed: same binary on both PCs and throughout a campaign,
+  recorded and checked.
 
 ## Changes from v5.1
 

@@ -208,4 +208,7 @@ c = cells[0]
 check(len(cells) == 1 and (c["attempts"], c["counted"], c["successes"], c["failures"], c["deadline_reached"])
       == (4, 2, 1, 1, 1) and c["median_delivery_s"] == 41.0 and len(c["not_counted"]) == 2,
       "the cell counts 1 success and 1 failure out of 2 counted, median 41 s")
+mixed = [dict(rows[0], modem_binary_sha256="a" * 64), dict(rows[2], modem_binary_sha256="b" * 64)]
+check(cc.cell_table(mixed)[0].get("warning", "").startswith("the modem binary changed"),
+      "a cell whose modem version changed is flagged")
 print("ALL CROSS-CHECK TESTS PASSED")

@@ -281,6 +281,7 @@ def attach_simulator(row: dict, sender: dict, receiver: dict, sim_attempts: list
     condition, attempt = match.group("condition"), int(match.group("attempt"))
     row.update(series=match.group("series"), condition=condition, load=match.group("load"), attempt=attempt,
                delivery_time_s=sender["result"].get("delivery_time_s"),
+               modem_binary_sha256=sender["result"].get("modem_binary_sha256"),
                deadline_reached=bool(sender["result"].get("deadline_reached")))
     limit = (sender["result"].get("deadline_s") or 3600) + 300
     near = sorted((a for a in sim_attempts
@@ -313,8 +314,10 @@ def cell_table(rows: list[dict]) -> list[dict]:
         cell = cells.setdefault(key, {"series": key[0], "arm": key[1], "condition": key[2], "load": key[3],
                                       "attempts": 0,
                                       "counted": 0, "successes": 0, "failures": 0, "deadline_reached": 0,
-                                      "not_counted": [], "times": []})
+                                      "not_counted": [], "times": [], "binaries": set()})
         cell["attempts"] += 1
+        if row.get("modem_binary_sha256"):
+            cell["binaries"].add(row["modem_binary_sha256"])
         if row["outcome"] in ("passed", "failed"):
             cell["counted"] += 1
             if row["outcome"] == "passed":
@@ -331,6 +334,9 @@ def cell_table(rows: list[dict]) -> list[dict]:
     for cell in cells.values():
         low, high = wilson(cell["successes"], cell["counted"])
         times = cell.pop("times")
+        cell["modem_binaries"] = sorted(cell.pop("binaries"))
+        if len(cell["modem_binaries"]) > 1:
+            cell["warning"] = "the modem binary changed during the cell (version updated?)"
         cell.update(success_rate=round(cell["successes"] / cell["counted"], 4) if cell["counted"] else None,
                     wilson_95=[low, high], median_delivery_s=None if not times else round(median(times), 1))
         out.append(cell)
@@ -411,7 +417,8 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
     if report["cells"]:
         # A Phase 1 session: failures are results; the session needs review only for
         # attempts that could not be counted, crossed runs or runs without a partner.
-        clean = not crossed and not unpaired and not any(c["not_counted"] for c in report["cells"])
+        clean = (not crossed and not unpaired and not any(c["not_counted"] for c in report["cells"])
+                 and not any(c.get("warning") for c in report["cells"]))
         report["outcome"] = "passed" if clean else "review"
     report["outcome"] = ("passed" if rows and set(counts) == {"passed"} and not crossed
                          else "review")

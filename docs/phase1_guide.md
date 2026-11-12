@@ -40,6 +40,14 @@ in green: it has measured the calibration tone of each direction.
 Start the modem and run the full 9-test sequence for each arm, with the simulator
 still in Transparent mode. All pairs must pass.
 
+## 3a. Same modem version on both PCs
+
+Any VARA version may be used, but both PCs must run the same one: Check VARA shows
+the first characters of VARA.exe's SHA-256, and they must match on PC A and PC B.
+Untick "Allow VARA check for updates via internet" on both PCs so the version does
+not change during the campaign. The cross-check rejects pairs from different
+binaries.
+
 ## 4. Equal peaks
 
 During the smoke test the simulator shows each direction's "peak … dB vs reference".
