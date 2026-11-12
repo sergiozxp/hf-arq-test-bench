@@ -8,7 +8,10 @@ definitions: phase1_channel_design.md.
 
 - A third Behringer UCA222 (UCA-S), connected by USB to PC B. In Windows Sound
   settings rename it `UCA222-S` on both tabs, 48 kHz, 16 bit, playback 100,
-  recording 54, enhancements off, like the other two.
+  recording 54, enhancements off, "Allow applications to take exclusive control of
+  this device" unticked on both tabs, like the other two. On PC B this matters most:
+  the modem and the simulator share the computer, and a program holding an interface
+  in exclusive mode leaves the other one deaf or silent.
 - Four RCA connections of one conductor each (mono cables, or one plug of each
   stereo cable with the other left free):
 

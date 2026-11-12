@@ -61,6 +61,16 @@ references -6.54 / -6.64 dBFS peak at the simulator input. Mercury full sequence
 through the simulator, zero dropouts in 25 min, Mercury peaks within +0.05 dB of the
 references, PortAudio latency 43 ms in / 213 ms out.
 
+Minimum replication kit (app 0.2.0-alpha.5, 2026-11-12, simulator Moderate, equal RMS
+SNR, 200 B, 10 attempts, every simulator attempt valid): Mercury 1.9.19 10/10, median
+delivery 56.3 s; VARA HF 4.9.1 unlicensed (Drive -3 dB) 10/10, 66.1 s; VARA HF 4.9.1
+licensed (Drive -7 dB) 10/10, 46.9 s. Median effective SNR A->B 2.88–3.05 dB.
+Before the valid VARA unlicensed series, three runs (18:31–18:47 UTC, 15:31–15:47 local)
+were stopped: PC A called for 10 min and PC B's VARA registered no signal at all. The
+operator then unticked "Allow applications to take exclusive control of this device"
+on PC B's two interfaces (UCA-B and UCA-S); the cell then ran 10/10 from attempt 1. The
+stopped runs are kept and are not counted.
+
 Bench calibration with the bench's own signal (app 0.2.0-alpha.4, 2026-10-23 03:54 UTC,
 clean cable, Windows levels 100/54, left channel): A->B SNR 74.1 dB, SINAD 71.2 dB;
 B->A SNR 77.5 dB, SINAD 73.8 dB; tone received at -6.7 dBFS peak for -6.0 dBFS sent
