@@ -158,6 +158,7 @@ class SimulatorWindow(tk.Toplevel):
 
     def _poll(self) -> None:
         self._poll_once()
+        self._show_reference()   # the reference may be measured while the simulator runs
         self.after(1000, self._poll)
 
     def _show_reference(self) -> None:
