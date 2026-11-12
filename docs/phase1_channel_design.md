@@ -121,6 +121,12 @@ same-session ACK (E0-3 procedure).
 
 - **Success:** B verifies length and SHA-256, and A verifies the ACK before the
   deadline: 10 min for 200 B, 60 min for 10 KiB, counted from A's CONNECT.
+  The modem's own transmit report (BUFFER 0) is not part of the criterion: B's ACK
+  carries the payload's SHA-256 and so proves the delivery. (The first Mercury pilot,
+  2026-11-12, had one attempt in Poor where the ACK arrived and was verified but Mercury
+  never reported BUFFER 0; until then the software counted it as a failure, contrary to
+  this definition. The software now applies the definition as written, also to earlier
+  results.)
 - **Failure:** anything else before the deadline, or the deadline itself (a censored
   attempt). Delivery time = from A's CONNECT to A's verified ACK.
 - **Not counted, repeated with the same trace:** audio dropouts (input overflow or

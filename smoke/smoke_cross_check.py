@@ -132,7 +132,15 @@ def cross_check(em: dict, rx: dict) -> dict:
         "protocol_version": em.get("protocol_version") or rx.get("protocol_version"),
         "smoke_profile": em.get("smoke_profile") or rx.get("smoke_profile"),
     }
-    delivered = bool(hash_ok and rx.get("delivered_intact") and em.get("sender_completed"))
+    sender_ok = em.get("sender_completed")
+    if em.get("ack_mode") and em.get("condition") and em.get("ack_verified") is True:
+        # Phase 1 (design section 4): success = B verifies length and SHA-256 and A verifies B's
+        # ACK before the deadline. A missing BUFFER 0 report from the modem is not a failure
+        # when the ACK arrived (results of clients before this rule are judged the same way).
+        others = [f for f in em.get("failures") or [] if not f.startswith("BUFFER 0 was not observed")]
+        if not others and not em.get("deadline_reached"):
+            sender_ok = True
+    delivered = bool(hash_ok and rx.get("delivered_intact") and sender_ok)
     if em.get("ack_mode"):
         # E0-3: delivery also requires A to have verified B's ACK in the same session.
         result["sender_ack_verified"] = em.get("ack_verified")

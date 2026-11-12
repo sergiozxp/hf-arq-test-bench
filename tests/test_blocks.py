@@ -175,4 +175,17 @@ r = {"outcome": "passed", "arm": ARM}
 cc.attach_simulator(r, sender, receiver, [sim])
 check(r["outcome"] == "not_counted" and any("announced" in x for x in r["not_counted_reasons"]),
       "cross-check: the simulator's announced tag must be the run's tag")
+# ---------------------------------------------------------------- Phase 1 success rule (design section 4)
+em = {"mode": "send", "tag": "PILOT-poor-200B-10", "payload_sha256": "ab", "ack_mode": True, "ack_verified": True,
+      "ack_line": "ACK run=1 SHA256=2", "condition": "poor", "sender_completed": False,
+      "failures": ["BUFFER 0 was not observed after writing (timeout or socket closed)"], "arm": ARM}
+rx = {"mode": "listen", "tag": "PILOT-poor-200B-10", "payload_sha256": "ab", "delivered_intact": True,
+      "ack_line": "ACK run=1 SHA256=2", "ack_mode": True, "condition": "poor", "arm": ARM}
+check(cc.cross_check(em, rx)["outcome"] == "passed",
+      "Phase 1: B's verified payload plus A's verified ACK is a success even without BUFFER 0")
+check(cc.cross_check(dict(em, condition=None), dict(rx, condition=None))["outcome"] == "failed",
+      "smoke E0-3 (no condition) still requires BUFFER 0")
+check(cc.cross_check(dict(em, failures=em["failures"] + ["DISCONNECTED was not confirmed"]), rx)["outcome"] == "failed",
+      "Phase 1: any other failure of A still fails the attempt")
+check(cc.cross_check(dict(em, ack_verified=False), rx)["outcome"] == "failed", "Phase 1: no ACK, no success")
 print("ALL BLOCK TESTS PASSED")

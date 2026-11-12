@@ -326,10 +326,11 @@ def main() -> int:
     out = results / "sequences"
     out.mkdir(parents=True, exist_ok=True)
 
-    def save(kind: str) -> Path:
+    def save(kind: str, quiet: bool = False) -> Path:
         path = out / f"{kind}_{args.mode}_{started:%Y%m%dT%H%M%SZ}.json"
         path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        print(f"Sequence saved to: {path}", flush=True)
+        if not quiet:
+            print(f"Sequence saved to: {path}", flush=True)
         return path
 
     if args.block:
@@ -425,6 +426,8 @@ def main() -> int:
     if args.block and not args.no_zip:
         if args.mode == "listen":
             time.sleep(3)      # the simulator closes the last attempt on PC B's "finished"
+        report["zip"] = "(this ZIP)"
+        save("block", quiet=True)   # the block's own report goes into its ZIP
         report["zip"] = make_zip(results, "A" if args.mode == "send" else "B", arm, args.block)
         print(f"Results ZIP: {report['zip']}", flush=True)
     if args.block:

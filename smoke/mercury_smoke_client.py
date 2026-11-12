@@ -368,9 +368,7 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                 # shows a current buffer transition rather than a delayed stale value.
                 res["positive_buffer_before_zero"] = has_positive_buffer(
                     buffers_ns, t_w0, b0[1][0] if b0 else None)
-                if b0 is None:
-                    failures.append("BUFFER 0 was not observed after writing (timeout or socket closed)")
-                else:
+                if b0 is not None:
                     res["arq_confirmed"] = True
                     res["t_transferencia_s"] = seconds_between(t_w0, b0[1][0])
                 if args.ack:
@@ -378,6 +376,15 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                                          bounded(m.get("ack_timeout_s", 300)), failures)
                     if res.get("ack_verified"):
                         res["delivery_time_s"] = seconds_between(t_cmd, t_ack)
+                if b0 is None:
+                    if args.condition and res.get("ack_verified"):
+                        # Phase 1 success is B's verified payload plus A's verified ACK; B's ACK
+                        # (which carries the payload's SHA-256) proves delivery even if the modem
+                        # never reported BUFFER 0 before it (seen with Mercury in Poor).
+                        warnings.append("BUFFER 0 was not observed before B's ACK arrived; the ACK "
+                                        "shows the delivery")
+                    else:
+                        failures.append("BUFFER 0 was not observed after writing (timeout or socket closed)")
                 # The session is active, so DISCONNECT must be accepted.
                 responses["disconnect"] = send_command(cmd, "DISCONNECT", win)
                 judge_command(responses["disconnect"], "DISCONNECT", failures, warnings, req)
