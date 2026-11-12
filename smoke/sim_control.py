@@ -122,6 +122,13 @@ def describe_status(status: dict | None) -> tuple[str, str]:
         if info.get("output_clipped_samples"):
             parts.append(f"{d} CLIPPING {info['output_clipped_samples']}")
             problems = True
+    peaks = [(info or {}).get("input_peak_dbfs") for info in (status.get("directions") or {}).values()]
+    if peaks and all(p is not None and p <= -89.0 for p in peaks):
+        # 1 LSB on both inputs: the interface delivers digital silence, not even its noise floor
+        # (2026-11-12: another program held UCA222-S). Real silence on a UCA222 reads near -80 dBFS.
+        parts.append("NO SIGNAL AT ALL from UCA222-S input (digital silence): check that no other "
+                     "program (VARA, Mercury) uses UCA222-S and that it is not muted")
+        problems = True
     run = status.get("run_power") or {}
     if status.get("mode") == "transparent" and any((run.get(d) or {}).get("rms_dbfs") for d in run):
         base = status.get("base_power") or {}

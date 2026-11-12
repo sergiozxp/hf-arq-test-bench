@@ -145,6 +145,10 @@ assert color == "green" and "attempt 7" in text, text
 assert sim_control.describe_status({"mode": "poor", "attempt": 1, "xruns_total": {"output_underflow": 1},
                                     "directions": {}})[1] == "red"
 assert sim_control.describe_reference(None)[1] == "orange"
+dead = sim_control.describe_status({"mode": "transparent", "attempt": None, "xruns_total": {},
+                                    "directions": {"A->B": {"input_peak_dbfs": -90.31, "active_s": 0},
+                                                   "B->A": {"input_peak_dbfs": -90.31, "active_s": 0}}})
+assert dead[1] == "red" and "NO SIGNAL" in dead[0]
 assert sim_control.log_folder("x\nSimulator log: results/simulator/abc\n", Path("/w")) == Path("/w/results/simulator/abc")
 
 # The output of a full sequence: progress per test, a result per test, then the record.
