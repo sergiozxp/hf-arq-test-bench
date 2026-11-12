@@ -135,8 +135,14 @@ class SimulatorCore:
                    {d: [cm.SEED_ROOT, cm.CONDITIONS[self.mode].code, cm.DIRECTIONS[d], self.attempt]
                     for d in CHANNELS}})
 
+    def _refs(self) -> dict:
+        """The saved reference, updated by any calibration tone measured in this run."""
+        refs = dict((self.reference or {}).get("directions", {}))
+        refs.update(self.references_found)
+        return refs
+
     def _end_attempt(self) -> None:
-        refs = (self.reference or {}).get("directions", {})
+        refs = self._refs()
         summary = {d: self.stats[d].summary(refs.get(d)) for d in CHANNELS}
         problems = []
         if any(self.attempt_xruns.values()):
@@ -220,7 +226,7 @@ class SimulatorCore:
             self._end_attempt()
 
     def status(self) -> dict:
-        refs = (self.reference or {}).get("directions", {})
+        refs = self._refs()
         return {"t_utc": utc_now(), "mode": self.mode, "attempt": self.attempt if self.started else None,
                 "seconds_since_audio": round(self.samples / cm.FS - self.last_active, 1)
                 if self.started else None,

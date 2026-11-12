@@ -54,6 +54,13 @@ VARA HF 4.9.0 licensed, full sequence with app 0.2.0-alpha.4 (protocol 5.2) on
 2026-10-23 04:39–04:52 UTC: 9 of 9 pairs passed, E0-3 included, `LINK REGISTERED`,
 registration code redacted in every archived VARA.ini.
 
+Phase 1 bench, first run through the channel simulator in Transparent mode (app
+0.2.0-alpha.5, 2026-11-11/12, UCA-S on PC B): CAL A->B SNR 52.8 dB, SINAD 52.9 dB;
+B->A SNR 63.4 dB, SINAD 60.1 dB; tone -19.3 dBFS peak (12 dB simulator attenuation);
+references -6.54 / -6.64 dBFS peak at the simulator input. Mercury full sequence 9/9
+through the simulator, zero dropouts in 25 min, Mercury peaks within +0.05 dB of the
+references, PortAudio latency 43 ms in / 213 ms out.
+
 Bench calibration with the bench's own signal (app 0.2.0-alpha.4, 2026-10-23 03:54 UTC,
 clean cable, Windows levels 100/54, left channel): A->B SNR 74.1 dB, SINAD 71.2 dB;
 B->A SNR 77.5 dB, SINAD 73.8 dB; tone received at -6.7 dBFS peak for -6.0 dBFS sent

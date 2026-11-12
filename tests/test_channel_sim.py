@@ -73,6 +73,13 @@ short = sim.SimulatorCore("transparent", None, emit=lambda e: None)
 feed(short, np.concatenate([tone(2, -6), silence(1)]), silence(3))
 short.finish()
 check(not short.references_found, "a tone shorter than 3 s is not a reference")
+fresh_events = []
+fresh = sim.SimulatorCore("transparent", None, emit=fresh_events.append)
+feed(fresh, np.concatenate([silence(1), tone(6, -6.7), silence(40), burst(5, -6.2)]), silence(52))
+fresh.finish()
+last = [e for e in fresh_events if e["event"] == "attempt_end"][-1]
+check(abs(last["directions"]["A->B"]["peak_vs_reference_db"] - 0.5) < 0.05,
+      "a reference measured in this run is used at once for the peak check")
 reference = {"directions": refs}
 try:
     sim.SimulatorCore("moderate", None)
