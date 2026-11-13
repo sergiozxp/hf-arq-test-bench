@@ -39,10 +39,10 @@ Text is only a secondary sensitivity test and must declare any compression.
 
 ## Phase 1 design
 
-Phase 1 uses BW500, the two binary loads and three two-path Watterson channels with
-band-limited Gaussian noise (ITU-R F.1487 mid-latitude reference values):
+Phase 1 uses BW500, the two binary loads and three two-path Watterson profiles based
+on ITU-R F.1487 (mid-latitude delays and spreads), with band-limited Gaussian noise:
 
-| Condition | Differential delay | Frequency spread (2 sigma) | SNR (3 kHz, RMS) |
+| Profile | Differential delay | Frequency spread (2 sigma) | SNR (3 kHz, RMS) |
 |---|---:|---:|---:|
 | Good | 0.5 ms | 0.1 Hz | +10 dB |
 | Moderate | 1 ms | 0.5 Hz | +3 dB |
@@ -59,8 +59,11 @@ arm's Drive is set so that its highest peak stays at or below -3 dBFS at the
 simulator input (a safety ceiling against clipping, not a comparison rule). A
 secondary, PEP-limited profile refers SNR to the calibration tone's peak instead. Fading and noise come
 from published seeds per condition, direction and attempt number, the same for
-every arm and bench. A 10-attempt pilot per condition (exploratory) may change one
-condition's SNR once, before the campaign, with the reason recorded.
+every arm and bench. A 10-attempt pilot per profile (exploratory) may adjust a
+profile's SNR, before the campaign, only if the profile is saturated in success rate and
+also does not discriminate the delivery times. The pilots of 2026-11-13 were saturated
+(100 %) but separated the delivery times clearly, so the profiles are frozen before P1.
+Each cell reports both the success rate and the time to delivery and ACK.
 
 Each attempt has a deadline from A's CONNECT: 10 min for 200 B, 60 min for 10 KiB.
 An attempt with simulator dropouts, output clipping, a modem peak above -3 dBFS, noise
@@ -164,7 +167,7 @@ and about 11 dB for data frames on the same clean cable).
 ## Changes from v5.2
 
 - Minimum reproducible bench: two PCs and three UCA222, simulator on PC B.
-- Phase 1 channel fixed: three Watterson conditions with F.1487 delays and spreads,
+- Phase 1 channel fixed: three Watterson profiles based on F.1487 (delays and spreads),
   SNR in 3 kHz referred to each arm's RMS power (primary; a peak-referred PEP-limited
   profile is secondary), -3 dBFS peak ceiling, published seeds.
 - Attempt deadlines, validity rules for the simulator (dropouts, clipping, peak).

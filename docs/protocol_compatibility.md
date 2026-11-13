@@ -61,6 +61,13 @@ references -6.54 / -6.64 dBFS peak at the simulator input. Mercury full sequence
 through the simulator, zero dropouts in 25 min, Mercury peaks within +0.05 dB of the
 references, PortAudio latency 43 ms in / 213 ms out.
 
+Pilot (app 0.2.0-alpha.5 blocks, simulator Automatic, equal RMS SNR, 200 B, 10 attempts,
+2026-11-12/13, every simulator attempt valid): Good: VARA licensed 10/10, 36.4 s; Mercury
+10/10, 41.5 s; VARA unlicensed 10/10, 62.0 s. Poor: VARA licensed 10/10, 69.2 s; VARA
+unlicensed 10/10, 70.9 s; Mercury 10/10, 130.9 s (one success without BUFFER 0 from
+Mercury). VERIFY (Mercury, Poor, same traces) 10/10, 128.1 s. VARA rejects alphabetic
+SSIDs (MYCALL XQ2CG-A answered WRONG): those runs are procedure faults, excluded.
+
 Minimum replication kit (app 0.2.0-alpha.5, 2026-11-12, simulator Moderate, equal RMS
 SNR, 200 B, 10 attempts, every simulator attempt valid): Mercury 1.9.19 10/10, median
 delivery 56.3 s; VARA HF 4.9.1 unlicensed (Drive -3 dB) 10/10, 66.1 s; VARA HF 4.9.1

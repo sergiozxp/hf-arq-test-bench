@@ -36,10 +36,12 @@ and output of UCA-S share one clock, so the simulator needs no drift compensatio
 
 ## 2. Channel model
 
-Two-path Watterson model with additive Gaussian noise, with the mid-latitude
-reference values of ITU-R F.1487 (Annex 3):
+Two-path Watterson profiles based on ITU-R F.1487 (Annex 3, mid-latitude delays and
+frequency spreads), with additive Gaussian noise. The SNR values, the 3 kHz noise
+bandwidth and the audio band are this protocol's choices, so these are profiles based
+on F.1487, not the recommendation's complete test conditions:
 
-| Condition | Differential delay | Frequency spread (2 sigma) | SNR (3 kHz, RMS) |
+| Profile | Differential delay | Frequency spread (2 sigma) | SNR (3 kHz, RMS) |
 |---|---:|---:|---:|
 | Good | 0.5 ms | 0.1 Hz | +10 dB |
 | Moderate | 1 ms | 0.5 Hz | +3 dB |
@@ -157,9 +159,33 @@ same-session ACK (E0-3 procedure).
    simulator.
 4. **Power reference and ceiling:** each arm's RMS power saved from its transparent
    sequence, and its highest peak at or below -3 dBFS (Drive adjusted if needed).
-5. **Pilot:** 10 attempts of 200 B per condition, exploratory, to check that no
-   condition is 0 % or 100 % for all three arms. If one is, its SNR is changed once,
-   with the reason recorded before the campaign. After that nothing changes.
+5. **Pilot:** 10 attempts of 200 B per profile, exploratory. A profile's SNR is adjusted
+   only if the profile is saturated in success rate and also does not discriminate the
+   delivery times. (Rule as amended on 2026-11-13, before any P1 attempt; it replaces
+   "changed if 0 % or 100 % for all three arms".)
+
+### Pilot result and decision (2026-11-13, before P1)
+
+Kit (Moderate) and pilot (Good, Poor), 200 B, 10 attempts per cell; successes and median
+delivery time (A's CONNECT to A's verified ACK):
+
+| Profile | VARA HF licensed | Mercury 1.9.19 | VARA HF unlicensed |
+|---|---|---|---|
+| Good (+10 dB) | 10/10, 36.4 s | 10/10, 41.5 s | 10/10, 62.0 s |
+| Moderate (+3 dB) | 10/10, 46.9 s | 10/10, 56.3 s | 10/10, 66.1 s |
+| Poor (-3 dB) | 10/10, 69.2 s | 10/10, 130.9 s | 10/10, 70.9 s |
+
+All 90 counted attempts succeeded, so with 200 B and a 10 min deadline the success rate
+is saturated and does not separate the arms; the delivery times do (in Poor, Mercury's
+median is close to twice VARA's). By the rule above no SNR is changed: **the three
+profiles are frozen before P1.** The pilots show that the design works; they are not a
+result of the study. A verification series (VERIFY, Mercury, Poor) gave 10/10, 128.1 s.
+
+Transparency: the first VARA unlicensed pilot block was started with alphabetic SSIDs
+(XQ2CG-A/-B), which VARA rejects (MYCALL WRONG). Those runs (5 paired attempts and 6 runs
+on one PC only) were classified as procedure faults and excluded before the analysis;
+the ten valid attempts of each cell were completed afterwards with the same traces,
+using XQ2CG-1/-2.
 
 ## 6. Campaign and minimum replication kit
 
@@ -167,7 +193,7 @@ same-session ACK (E0-3 procedure).
   Run one arm at a time, condition by condition, both loads: one campaign block per arm
   (phase1_guide.md, section 5). An attempt counts once: a later run of an attempt that
   is already counted is listed as not counted.
-- **Minimum replication kit:** CAL plus 200 B in the moderate condition, 10 attempts
+- **Minimum replication kit:** CAL plus 200 B in the moderate profile, 10 attempts
   per arm. For this bench it is also the moderate part of the pilot.
 - **Series.** Kit (`KIT-…`), pilot (`PILOT-…`, good and poor, 200 B, 10 attempts) and
   campaign (`P1-…`) use the same seeds for attempt k but separate tags, so they are
@@ -177,7 +203,10 @@ same-session ACK (E0-3 procedure).
 ## 7. Report
 
 Per cell: attempts counted, successes, success rate with a 95 % Wilson interval, and
-the median delivery time among successes (with the deadline stated). Attempts not
+the median delivery time among successes (with the deadline stated). Success rate
+(reliability) and time to delivery and ACK are both essential and are both reported; in
+the 200 B pilots the success rate was saturated at 100 %, and in the 10 KiB cells
+failures can still appear. Attempts not
 counted are listed with their reason.
 
 ## 8. Software
