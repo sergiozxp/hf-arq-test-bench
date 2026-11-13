@@ -244,6 +244,15 @@ def finish(res, cmd, m, responses, failures, warnings, idx_start) -> None:
     res["failures"] = failures
 
 
+def mark_setup_fault(res: dict, failures: list[str]) -> None:
+    """A command rejected before the session (MYCALL, BW, session settings) is a setup
+    error of the station, not a result of the channel: a procedure fault, not counted,
+    repeated. Seen on 2026-11-12 with VARA rejecting the callsign XQ2CG-A (MYCALL WRONG)."""
+    if failures:
+        res["procedure_fault"] = True
+        res["procedure_fault_detail"] = "setup command rejected before the session: " + "; ".join(failures)
+
+
 BUFFER0_MISSING = "BUFFER 0 was not observed after writing (timeout or socket closed)"
 
 
@@ -334,6 +343,7 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     run_session_commands(cmd, profile, win, responses, failures, warnings)
     if args.bw_when == "before":
         enviar_bw()
+    mark_setup_fault(res, failures)
 
     idx0 = cmd.nlines()
     t_cmd = mono_ns()
@@ -468,6 +478,7 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
         enviar_bw()
     idx0 = cmd.nlines()
     t_conn = t_disc = None
+    mark_setup_fault(res, failures)
     if not failures:
         responses["listen"] = send_command(cmd, "LISTEN ON", win)
         if judge_command(responses["listen"], "LISTEN ON", failures, warnings, req):

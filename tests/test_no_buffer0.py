@@ -101,4 +101,27 @@ try:
           "smoke E0-3 (no channel condition) still requires BUFFER 0")
 finally:
     mock.terminate()
+    mock.wait(timeout=10)
+
+# 3. A modem that rejects the callsign (VARA and XQ2CG-A, 2026-11-12): a setup error of the
+#    station, a procedure fault on both sides, never a counted failure; the block redoes it.
+import smoke_gui_logic as logic
+import smoke_sequence as seq
+check(any("numeric SSID" in e for e in logic.validate_form(
+    {"mycall": "XQ2CG-A", "peer_call": "XQ2CG-B", "bw": "BW500", "role": "A", "modem": "vara"})),
+      "VARA with a letter SSID is refused by the form")
+check(not logic.validate_form({"mycall": "XQ2CG-1", "peer_call": "XQ2CG-2", "bw": "BW500", "role": "A",
+                               "modem": "vara"}), "VARA with numeric SSIDs is accepted")
+mock = subprocess.Popen([sys.executable, str(HERE / "mock_mercury.py"), "wrong_mycall"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+try:
+    time.sleep(1.5)
+    a, b, _ = pair("PILOT-good-200B-01", phase1=True)
+    check(a.get("procedure_fault") and b.get("procedure_fault")
+          and "MYCALL" in (a.get("procedure_fault_detail") or ""), "MYCALL WRONG: procedure fault on both PCs")
+    check(cc.cross_check(a, b)["outcome"] == "procedure_fault", "MYCALL WRONG: not counted as a failure")
+    check("PILOT-good-200B-01" not in {r["tag"] for r in seq.local_runs(temporary / "results_A", "send", a["arm"])},
+          "MYCALL WRONG: the block runs the attempt again on resume")
+finally:
+    mock.terminate()
 print("ALL NO-BUFFER-0 TESTS PASSED")

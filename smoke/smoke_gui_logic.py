@@ -43,6 +43,10 @@ def validate_form(values: dict) -> list[str]:
             if ssid(values.get(field, "")) in VARA_SPECIAL_SSIDS:
                 errors.append(f"{values[field]}: VARA treats -T, -R, -X and -L as special "
                               "extensions. Use a numeric SSID such as -1 and -2.")
+            elif ssid(values.get(field, "")) and not re.fullmatch(r"\d{1,2}", ssid(values[field])):
+                # 2026-11-12: VARA answered WRONG to MYCALL XQ2CG-A and XQ2CG-B.
+                errors.append(f"{values[field]}: VARA accepts only a numeric SSID (-0 to -15). "
+                              "Use for example -1 on PC A and -2 on PC B.")
     return errors
 
 
@@ -51,7 +55,8 @@ def callsign_notes(values: dict) -> list[str]:
     notes = []
     if values.get("modem", "mercury") == "mercury":
         for field in ("mycall", "peer_call"):
-            if ssid(values.get(field, "").upper()) in VARA_SPECIAL_SSIDS:
+            sfx = ssid(values.get(field, "").upper())
+            if sfx and not re.fullmatch(r"\d{1,2}", sfx):
                 notes.append(f"{values[field]}: VARA cannot use this SSID. To use the same "
                              "callsigns in every arm, prefer numeric SSIDs (-1, -2).")
     return notes

@@ -108,7 +108,10 @@ def local_runs(results: Path, mode: str, arm: str) -> list[dict]:
             result = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if result.get("mode") == mode and result.get("arm") == arm:
+        # An attempt with an exception, an infrastructure or a procedure fault is not counted
+        # by the cross-check, so it is not "done": the block runs it again on resume.
+        faulty = result.get("exception") or result.get("infrastructure_fault") or result.get("procedure_fault")
+        if result.get("mode") == mode and result.get("arm") == arm and not faulty:
             stamp = path.parent.name.rsplit("_", 2)
             started = None
             if len(stamp) == 3:
