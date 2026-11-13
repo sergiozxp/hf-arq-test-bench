@@ -189,6 +189,13 @@ using XQ2CG-1/-2.
 
 ## 6. Campaign and minimum replication kit
 
+Software versions in P1: 0.2.0-alpha.5 for the first 46 Mercury attempts (to
+P1-good-10KiB-16), 0.2.0-alpha.6 from then on. alpha.6 only changes how a stopped block is
+resumed; the channel, the measurement, the success rule and the counting are identical,
+and every run records its version. Mercury 1.9.19 stopped once with an access violation
+on PC A (2026-11-13, during P1-good-10KiB-17); the attempts lost with it are not counted
+and are run again; such crashes are reported separately with their frequency.
+
 - **Campaign:** 3 arms x 3 conditions x 2 loads = 18 cells of 30 attempts (540).
   Run one arm at a time, condition by condition, both loads: one campaign block per arm
   (phase1_guide.md, section 5). An attempt counts once: a later run of an attempt that
