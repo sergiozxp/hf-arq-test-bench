@@ -25,6 +25,7 @@ WHAT IT DOES NOT
 """
 from __future__ import annotations
 
+from mercury_smoke_client import has_setup_fault
 import csv
 import json
 import re
@@ -165,7 +166,7 @@ def cross_check(em: dict, rx: dict) -> dict:
         result["outcome"] = "invalid_pair"
     elif em.get("infrastructure_fault") or rx.get("infrastructure_fault"):
         result["outcome"] = "infrastructure_fault"
-    elif em.get("procedure_fault") or rx.get("procedure_fault"):
+    elif has_setup_fault(em) or has_setup_fault(rx):
         result["outcome"] = "procedure_fault"
     elif not delivered:
         result["outcome"] = "failed"

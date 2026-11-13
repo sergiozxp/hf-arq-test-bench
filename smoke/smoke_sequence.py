@@ -110,7 +110,8 @@ def local_runs(results: Path, mode: str, arm: str) -> list[dict]:
             continue
         # An attempt with an exception, an infrastructure or a procedure fault is not counted
         # by the cross-check, so it is not "done": the block runs it again on resume.
-        faulty = result.get("exception") or result.get("infrastructure_fault") or result.get("procedure_fault")
+        faulty = (result.get("exception") or result.get("infrastructure_fault")
+                  or mercury_smoke_client.has_setup_fault(result))
         if result.get("mode") == mode and result.get("arm") == arm and not faulty:
             stamp = path.parent.name.rsplit("_", 2)
             started = None
@@ -277,8 +278,8 @@ def bench_fault(result: dict | None, condition: str) -> str | None:
         return "script error or modem not reachable: " + (result.get("failures") or ["?"])[-1][:120]
     if result.get("infrastructure_fault"):
         return "infrastructure fault reported by the modem"
-    if result.get("procedure_fault"):
-        return "procedure fault"
+    if mercury_smoke_client.has_setup_fault(result):
+        return "procedure fault (" + (result.get("procedure_fault_detail") or "setup command rejected")[:120] + ")"
     failures = " ".join(result.get("failures") or [])
     if condition in NO_CONNECT_IS_FAULT and "no CONNECTED event" in failures:
         return f"no connection in the {condition} condition"

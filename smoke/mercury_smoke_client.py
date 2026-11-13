@@ -253,6 +253,17 @@ def mark_setup_fault(res: dict, failures: list[str]) -> None:
         res["procedure_fault_detail"] = "setup command rejected before the session: " + "; ".join(failures)
 
 
+SETUP_LABELS = ("MYCALL:", "BW before CONNECT:", "BW before LISTEN ON:")
+
+
+def has_setup_fault(res: dict) -> bool:
+    """Procedure fault for a rejected setup command, also for results written before the
+    client recorded it (their raw failure list shows the rejected command)."""
+    if res.get("procedure_fault"):
+        return True
+    return any(str(f).startswith(SETUP_LABELS) for f in res.get("failures") or [])
+
+
 BUFFER0_MISSING = "BUFFER 0 was not observed after writing (timeout or socket closed)"
 
 

@@ -188,4 +188,17 @@ check(cc.cross_check(dict(em, condition=None), dict(rx, condition=None))["outcom
 check(cc.cross_check(dict(em, failures=em["failures"] + ["DISCONNECTED was not confirmed"]), rx)["outcome"] == "failed",
       "Phase 1: any other failure of A still fails the attempt")
 check(cc.cross_check(dict(em, ack_verified=False), rx)["outcome"] == "failed", "Phase 1: no ACK, no success")
+# ---------------------------------------------------------------- rejected callsign, results of the earlier client
+old_style = {"failures": ["MYCALL: the modem returned WRONG (MYCALL XQ2CG-A)", "DISCONNECTED was not confirmed"]}
+check(seq.bench_fault(old_style, "poor") is not None, "guard: a rejected MYCALL is a bench fault, also in Poor")
+r6 = tmp / "r6"
+make_run(r6, "PILOT-good-200B-01", "send", now, **old_style)
+make_run(r6, "PILOT-good-200B-02", "send", now, failures=[])
+plan, done, _ = seq.block_plan("send", "c.toml", "pilot", r6, ARM)
+check(done == 1 and plan[0]["tag"] == "PILOT-good-200B-01", "resume redoes an attempt whose MYCALL was rejected")
+em_old = dict(em, condition="good", tag="PILOT-good-200B-01", failures=old_style["failures"], ack_verified=False)
+rx_old = dict(rx, condition="good", tag="PILOT-good-200B-01", delivered_intact=None,
+              failures=["MYCALL: the modem returned WRONG (MYCALL XQ2CG-B)"])
+check(cc.cross_check(em_old, rx_old)["outcome"] == "procedure_fault",
+      "cross-check: a rejected MYCALL (earlier client) is a procedure fault, not a counted failure")
 print("ALL BLOCK TESTS PASSED")
