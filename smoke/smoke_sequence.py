@@ -111,7 +111,8 @@ def local_runs(results: Path, mode: str, arm: str) -> list[dict]:
         # An attempt with an exception, an infrastructure or a procedure fault is not counted
         # by the cross-check, so it is not "done": the block runs it again on resume.
         faulty = (result.get("exception") or result.get("infrastructure_fault")
-                  or mercury_smoke_client.has_setup_fault(result))
+                  or mercury_smoke_client.has_setup_fault(result)
+                  or bench_fault(result, result.get("condition") or "poor") is not None)
         if result.get("mode") == mode and result.get("arm") == arm and not faulty:
             stamp = path.parent.name.rsplit("_", 2)
             started = None
@@ -157,8 +158,15 @@ def repeat_list(report: dict, arm: str) -> list[tuple[str, str, str, int]]:
     return out
 
 
-def block_plan(mode: str, config: str, kind: str, results: Path, arm: str) -> tuple[list[dict], int, str]:
-    """The block's remaining attempts on this PC, the number already done, and a note."""
+def block_plan(mode: str, config: str, kind: str, results: Path, arm: str,
+               start: int = 0) -> tuple[list[dict], int, str]:
+    """The block's remaining attempts on this PC, the number already done, and a note.
+
+    start > 0 (pilot and campaign): every attempt from that plan position on, without
+    skipping, so that both PCs restart at the same attempt after one of them lost it (for
+    example a modem crash on PC A while PC B recorded the attempt as a failure). An attempt
+    run again counts once in the cross-check.
+    """
     if kind == "repeat":
         path, report = latest_cross_check(results)
         if report is None:
@@ -173,6 +181,10 @@ def block_plan(mode: str, config: str, kind: str, results: Path, arm: str) -> tu
     plan = [cell_step(mode, config, series, cond, load, k)
             for series, cond, load in logic.BLOCK_CELLS[kind]
             for k in range(1, logic.SERIES_ATTEMPTS[series] + 1)]
+    if start:
+        if not 1 <= start <= len(plan):
+            raise ValueError(f"the start position must be between 1 and {len(plan)}")
+        return plan[start - 1:], 0, f"from position {start} ({plan[start - 1]['tag']}), without skipping"
     done = {r["tag"] for r in local_runs(results, mode, arm)}
     remaining = [s for s in plan if s["tag"] not in done]
     return remaining, len(plan) - len(remaining), ""
@@ -319,6 +331,9 @@ def main() -> int:
                          "VERIFY verification run (reported apart)")
     ap.add_argument("--block", choices=["pilot", "campaign", "repeat"], default=None,
                     help="every remaining attempt of a stage for the modem in use (resumes by itself)")
+    ap.add_argument("--block-from", type=int, default=0,
+                    help="pilot/campaign block: run every attempt from this plan position on (no skipping), "
+                         "with the same position on both PCs")
     ap.add_argument("--no-zip", action="store_true", help="block: do not create the results ZIP at the end")
     args = ap.parse_args()
     cfg = load_config(args.config)
@@ -341,7 +356,8 @@ def main() -> int:
     if args.block:
         report["block"] = {"kind": args.block, "arm": arm}
         try:
-            plan, skipped, note = block_plan(args.mode, args.config, args.block, results, arm)
+            plan, skipped, note = block_plan(args.mode, args.config, args.block, results, arm,
+                                             args.block_from)
         except ValueError as error:
             plan, skipped, note = [], 0, ""
             report.update(outcome="stopped", stop_reason=f"{error}.")

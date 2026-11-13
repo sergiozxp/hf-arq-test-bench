@@ -105,6 +105,12 @@ What the block checks for you:
 - **Resume.** Each PC skips the attempts it has already completed for this modem. After
   a power cut or a stop, press RUN again on PC B and then PC A; check that both show
   the same first attempt.
+- **Restart both PCs at the same attempt.** If one PC lost attempts that the other
+  recorded (for example Mercury crashed on PC A while PC B recorded the attempt as a
+  failure), automatic resume can start the two PCs at different attempts. Then set
+  **Start at** to the same plan position on both PCs (the line beside it shows the
+  attempt, for example "Position 47 = P1-good-10KiB-17"): both run every attempt from
+  there on. An attempt run again counts once in the cross-check.
 - **Bench faults.** The block stops after 3 attempts in a row that point to the bench,
   not the channel: no result (script error or modem not reachable), an infrastructure
   or procedure fault, or no connection at all in Good or Moderate. (In Poor, failing to

@@ -374,9 +374,9 @@ class ModemSmokeWindow(tk.Tk):
         block = logic.is_block(name)
         enabled = sequence or campaign or logic.is_h1(name)
         if block:
-            limit, kind = 1, ("block", 0)
-            label, hint = ("Start at:", "Automatic: each PC skips the attempts it has already completed "
-                                        "for this modem, so RUN resumes a stopped block.")
+            tags = logic.block_tags(logic.BLOCK_TESTS[name])
+            limit, kind = max(len(tags), 1), ("block", name)
+            label, hint = ("Start at (0 = automatic):", "")
         elif campaign:
             limit = logic.CAMPAIGN_TESTS[name]["attempts"]
             kind = ("campaign", limit)
@@ -391,11 +391,26 @@ class ModemSmokeWindow(tk.Tk):
         if self.repeat_mode != kind:
             # The spin box is the H1 repetition, the first step of the sequence or the first attempt.
             self.repeat_mode = kind
-            self.repeat_box.configure(to=limit)
+            self.repeat_box.configure(to=limit, from_=0 if block else 1)
             self.repeat_label.configure(text=label)
             self.repeat_hint.configure(text=hint)
-            self.repeat.set(1)
-        self.repeat_box.configure(state="readonly" if enabled else "disabled")
+            self.repeat.set(0 if block else 1)
+        if block:
+            # 0: each PC resumes by itself. n: both PCs run every attempt from position n of the
+            # fixed plan (after a modem crash on one PC, so that both restart at the same attempt).
+            tags = logic.block_tags(logic.BLOCK_TESTS[name])
+            self.repeat_box.configure(state="normal" if tags else "disabled")
+            try:
+                position = int(self.repeat.get())
+            except (tk.TclError, ValueError):
+                position = 0
+            position = min(max(position, 0), len(tags))
+            self.repeat_hint.configure(text=(
+                "Automatic: each PC skips the attempts it has already completed for this modem."
+                if position == 0 else f"Position {position} = {tags[position - 1]}: both PCs run every "
+                                      "attempt from here on; use the same position on PC A and PC B."))
+        else:
+            self.repeat_box.configure(state="readonly" if enabled else "disabled")
         try:
             repetition = int(self.repeat.get()) if enabled else 1
         except (tk.TclError, ValueError):
@@ -953,7 +968,11 @@ class ModemSmokeWindow(tk.Tk):
         campaign = logic.is_campaign(test_name)
         repetition = self.repeat.get() if (sequence or campaign or logic.is_h1(test_name)) else 1
         if logic.is_block(test_name):
-            commands = logic.block_commands(values["role"], test_name)
+            try:
+                position = int(self.repeat.get())
+            except (tk.TclError, ValueError):
+                position = 0
+            commands = logic.block_commands(values["role"], test_name, max(position, 0))
             tag = logic.test_tag(test_name, 1)
         elif campaign:
             commands = logic.campaign_commands(values["role"], test_name, repetition)
