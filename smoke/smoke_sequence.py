@@ -310,8 +310,9 @@ def main() -> int:
                     help="Phase 1: run one cell in this channel condition")
     ap.add_argument("--load", choices=list(logic.CAMPAIGN_LOADS), default="200B")
     ap.add_argument("--attempts", type=int, default=30)
-    ap.add_argument("--series", choices=["P1", "KIT", "PILOT"], default="P1",
-                    help="P1 campaign, KIT minimum replication kit, PILOT exploratory pilot")
+    ap.add_argument("--series", choices=["P1", "KIT", "PILOT", "VERIFY"], default="P1",
+                    help="P1 campaign, KIT minimum replication kit, PILOT exploratory pilot, "
+                         "VERIFY verification run (reported apart)")
     ap.add_argument("--block", choices=["pilot", "campaign", "repeat"], default=None,
                     help="every remaining attempt of a stage for the modem in use (resumes by itself)")
     ap.add_argument("--no-zip", action="store_true", help="block: do not create the results ZIP at the end")

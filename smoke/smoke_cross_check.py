@@ -38,7 +38,7 @@ RUN_DIR_RE = re.compile(r"^(?P<tag>.+)_(?P<start>\d{8}T\d{6}Z)_(?P<rid>[0-9a-f]{
 # sender start minus receiver start). The negative margin absorbs clock offset.
 PAIR_WINDOW_S = (-120, 600)
 CROSSED_WINDOW_S = 120
-P1_TAG_RE = re.compile(r"^(?P<series>P1|KIT|PILOT)-(?P<condition>[a-z]+)-(?P<load>[0-9A-Za-z]+)-(?P<attempt>\d+)$")
+P1_TAG_RE = re.compile(r"^(?P<series>P1|KIT|PILOT|VERIFY)-(?P<condition>[a-z]+)-(?P<load>[0-9A-Za-z]+)-(?P<attempt>\d+)$")
 # The simulator runs on PC B, so its attempts are matched against PC B's runs (same clock):
 # attempt k starts on PC A's first audio, after PC B's run k started listening.
 SIM_EARLY_S = 0
@@ -133,13 +133,22 @@ def cross_check(em: dict, rx: dict) -> dict:
         "smoke_profile": em.get("smoke_profile") or rx.get("smoke_profile"),
     }
     sender_ok = em.get("sender_completed")
-    if em.get("ack_mode") and em.get("condition") and em.get("ack_verified") is True:
-        # Phase 1 (design section 4): success = B verifies length and SHA-256 and A verifies B's
-        # ACK before the deadline. A missing BUFFER 0 report from the modem is not a failure
-        # when the ACK arrived (results of clients before this rule are judged the same way).
-        others = [f for f in em.get("failures") or [] if not f.startswith("BUFFER 0 was not observed")]
-        if not others and not em.get("deadline_reached"):
-            sender_ok = True
+    phase1 = bool(em.get("ack_mode") and em.get("condition"))
+    if phase1:
+        # Phase 1 (design section 4). The raw sender_completed is kept as recorded; the
+        # derived judgement is A's part of counted_success: ACK verified before the deadline,
+        # no infrastructure or procedure fault, no failure other than a missing BUFFER 0.
+        # Results written before the client recorded it are judged the same way here.
+        if "sender_counted_success" in em:
+            sender_ok = em["sender_counted_success"]
+        else:
+            others = [f for f in em.get("failures") or [] if not f.startswith("BUFFER 0 was not observed")]
+            sender_ok = bool(em.get("ack_verified") is True and not em.get("deadline_reached")
+                             and not em.get("infrastructure_fault") and not em.get("procedure_fault")
+                             and not others)
+        if sender_ok and not em.get("arq_confirmed"):
+            warnings.append("BUFFER 0 not observed by A; B's verified ACK shows the delivery "
+                            "(warning, not a failure)")
     delivered = bool(hash_ok and rx.get("delivered_intact") and sender_ok)
     if em.get("ack_mode"):
         # E0-3: delivery also requires A to have verified B's ACK in the same session.
@@ -163,6 +172,11 @@ def cross_check(em: dict, rx: dict) -> dict:
     else:
         # "incomplete": delivery verified, but evidence that MS-1.0 requires is missing.
         result["outcome"] = "incomplete" if incomplete else "passed"
+    if phase1:
+        result["sender_completed"] = em.get("sender_completed")      # raw, as recorded
+        result["sender_counted_success"] = sender_ok
+        result["counted_success"] = result["outcome"] == "passed"
+        result["buffer0_missing"] = not em.get("arq_confirmed")
     return result
 
 
@@ -342,6 +356,7 @@ def cell_table(rows: list[dict]) -> list[dict]:
         cell = cells.setdefault(key, {"series": key[0], "arm": key[1], "condition": key[2], "load": key[3],
                                       "attempts": 0,
                                       "counted": 0, "successes": 0, "failures": 0, "deadline_reached": 0,
+                                      "successes_without_buffer0": 0,
                                       "not_counted": [], "times": [], "binaries": set(), "snrs": []})
         cell["attempts"] += 1
         if row.get("modem_binary_sha256"):
@@ -352,6 +367,7 @@ def cell_table(rows: list[dict]) -> list[dict]:
                 cell["snrs"].append(row["effective_snr_db"])
             if row["outcome"] == "passed":
                 cell["successes"] += 1
+                cell["successes_without_buffer0"] += int(bool(row.get("buffer0_missing")))
                 if row.get("delivery_time_s") is not None:
                     cell["times"].append(row["delivery_time_s"])
             else:
@@ -464,13 +480,14 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
             writer = csv.writer(handle, delimiter=";")
             writer.writerow(["series", "arm", "condition", "load", "attempts", "counted", "successes", "failures",
                              "deadline_reached", "success_rate", "wilson_low", "wilson_high",
-                             "median_delivery_s", "median_effective_snr_db", "not_counted"])
+                             "median_delivery_s", "median_effective_snr_db", "not_counted",
+                             "successes_without_buffer0"])
             for c in report["cells"]:
                 writer.writerow([c["series"], c["arm"], c["condition"], c["load"], c["attempts"], c["counted"],
                                  c["successes"], c["failures"], c["deadline_reached"], c["success_rate"],
                                  c["wilson_95"][0], c["wilson_95"][1], c["median_delivery_s"],
                                  c["median_effective_snr_db"],
-                                 len(c["not_counted"])])
+                                 len(c["not_counted"]), c["successes_without_buffer0"]])
     with open(out_dir / "cross_check_report.csv", "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, delimiter=";")
         writer.writerow(["sender_start_utc", "tag", "outcome", "modem", "arm", "sender_run",

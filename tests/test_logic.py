@@ -172,7 +172,10 @@ check("1 stopped run" in text and "A->B SINAD 58.0" in text, "session summary li
 
 # Phase 1 cells
 check(logic.TEST_CHOICES[2:5] == list(logic.BLOCK_TESTS) and logic.TEST_CHOICES[5] == logic.KIT_TEST
-      and len(logic.CAMPAIGN_TESTS) == 9, "three blocks, then the kit, two pilots and six campaign cells are offered")
+      and len(logic.CAMPAIGN_TESTS) == 10, "three blocks, then the kit, two pilots, six campaign cells and the verification")
+check(logic.campaign_commands("B", logic.VERIFY_TEST, 1)[0][logic.campaign_commands("B", logic.VERIFY_TEST, 1)[0].index("--series") + 1]
+      == "VERIFY" and logic.campaign_tag("poor", "200B", 1, "VERIFY") == "VERIFY-poor-200B-01",
+      "verification series VERIFY-poor-200B-01..10, the same traces as the pilot")
 check(logic.block_commands("B", logic.BLOCK_CAMPAIGN) == [["smoke_sequence.py", "listen", "--block", "campaign"]]
       and logic.block_commands("A", logic.BLOCK_PILOT)[0][:4] == ["smoke_sequence.py", "send", "--block", "pilot"],
       "block commands")

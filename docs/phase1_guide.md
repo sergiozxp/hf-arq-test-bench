@@ -123,6 +123,13 @@ After a block:
 Single cells ("KIT …", "PILOT …", "P1 …") can still be run one at a time with a start
 attempt; with the simulator in Automatic mode they need no simulator setting either.
 
+## Verification series
+
+"VERIFY  Poor, 200 B, 10 attempts (verification of the success rule)" runs the same ten
+Poor traces as the pilot in a series of its own (`VERIFY-poor-200B-01…10`), reported
+apart and never mixed with PILOT or P1. It is run as a single cell (start attempt 1,
+simulator in Automatic mode), PC B first.
+
 ## What is not counted
 
 An attempt is not counted, and is repeated later with the same attempt number, when

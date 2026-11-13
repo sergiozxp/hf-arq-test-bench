@@ -211,8 +211,12 @@ for _cond, _label in CAMPAIGN_CONDITIONS.items():
     for _load in CAMPAIGN_LOADS:
         CAMPAIGN_TESTS[f"P1  {_label}, {CAMPAIGN_LOAD_LABELS[_load]}, 30 attempts"] = dict(
             series="P1", condition=_cond, load=_load, attempts=30)
+# Verification of the Phase 1 success rule on the bench (2026-11-12): the same ten Poor
+# traces as the pilot, in a series of its own that is never mixed with PILOT or P1.
+VERIFY_TEST = "VERIFY  Poor, 200 B, 10 attempts (verification of the success rule)"
+CAMPAIGN_TESTS[VERIFY_TEST] = dict(series="VERIFY", condition="poor", load="200B", attempts=10)
 CAMPAIGN_GAP_S = SEQUENCE_GAP_S + 60     # every attempt ends with the same-session ACK
-SERIES_ATTEMPTS = {"KIT": 10, "PILOT": 10, "P1": 30}
+SERIES_ATTEMPTS = {"KIT": 10, "PILOT": 10, "P1": 30, "VERIFY": 10}
 
 # Blocks (alpha.5): every remaining run of one stage for the modem in use, with one RUN per
 # PC. The plan is fixed; each PC skips the attempts it has already completed for this arm,
@@ -459,6 +463,8 @@ def summarize_report(report: dict) -> tuple[str, str]:
             if c.get("median_effective_snr_db") is not None:
                 med += f", SNR {c['median_effective_snr_db']:+.1f} dB"
             extra = f", {len(c['not_counted'])} not counted" if c["not_counted"] else ""
+            if c.get("successes_without_buffer0"):
+                extra += f", {c['successes_without_buffer0']} success(es) without BUFFER 0 (warning)"
             lines.append(f"{c.get('series', 'P1')} · {c['arm']} · {c['condition']} · {c['load']}: "
                          f"{c['successes']}/{c['counted']} = "
                          f"{rate}{interval}{med}{extra}")

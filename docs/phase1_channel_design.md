@@ -122,11 +122,18 @@ same-session ACK (E0-3 procedure).
 - **Success:** B verifies length and SHA-256, and A verifies the ACK before the
   deadline: 10 min for 200 B, 60 min for 10 KiB, counted from A's CONNECT.
   The modem's own transmit report (BUFFER 0) is not part of the criterion: B's ACK
-  carries the payload's SHA-256 and so proves the delivery. (The first Mercury pilot,
-  2026-11-12, had one attempt in Poor where the ACK arrived and was verified but Mercury
-  never reported BUFFER 0; until then the software counted it as a failure, contrary to
-  this definition. The software now applies the definition as written, also to earlier
-  results.)
+  carries the payload's SHA-256 and so proves the delivery. The raw evidence is kept
+  as recorded (`sender_completed`, `arq_confirmed` and the raw failure list, where a
+  missing BUFFER 0 still appears); the judgement is a derived field, `counted_success`:
+  B verified the payload's SHA-256, A verified B's ACK (same run and hash) before the
+  deadline, no infrastructure or procedure fault, and no failure of A other than a
+  missing BUFFER 0, which is then reported as a warning. Each cell reports how many of
+  its successes had no BUFFER 0. (The first Mercury pilot, 2026-11-12, had one attempt in
+  Poor where the ACK arrived and was verified but Mercury never reported BUFFER 0; the
+  software then counted it as a failure, contrary to this definition. The cross-check
+  now applies the definition as written, also to earlier results, and a separate
+  verification series, `VERIFY-poor-200B-01…10`, with the same ten Poor traces checks
+  it on the bench.)
 - **Failure:** anything else before the deadline, or the deadline itself (a censored
   attempt). Delivery time = from A's CONNECT to A's verified ACK.
 - **Not counted, repeated with the same trace:** audio dropouts (input overflow or

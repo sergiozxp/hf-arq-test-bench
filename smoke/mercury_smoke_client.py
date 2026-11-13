@@ -244,6 +244,27 @@ def finish(res, cmd, m, responses, failures, warnings, idx_start) -> None:
     res["failures"] = failures
 
 
+BUFFER0_MISSING = "BUFFER 0 was not observed after writing (timeout or socket closed)"
+
+
+def phase1_sender_judgement(res: dict) -> None:
+    """Phase 1 (design section 4), sender side. The raw fields (failures, sender_completed,
+    arq_confirmed) are kept unchanged; this adds the derived judgement. A's part of a counted
+    success: B's ACK verified (same run and payload hash) before the deadline, no
+    infrastructure or procedure fault, and no failure other than a missing BUFFER 0, which
+    is then a warning: B's ACK carries the payload's SHA-256 and so proves the delivery.
+    The pair's counted_success (cross-check) also needs B's verified payload."""
+    failures = res.get("failures") or []
+    others = [f for f in failures if f != BUFFER0_MISSING]
+    res["buffer0_observed"] = bool(res.get("arq_confirmed"))
+    res["sender_counted_success"] = bool(
+        res.get("ack_verified") is True and not res.get("deadline_reached")
+        and not res.get("infrastructure_fault") and not res.get("procedure_fault") and not others)
+    res["phase1_warnings"] = (["BUFFER 0 not observed; B's verified ACK shows the delivery (warning, "
+                               "not a failure)"] if res["sender_counted_success"] and BUFFER0_MISSING in failures
+                              else [])
+
+
 def apply_deadline(m: dict, args, role: str) -> dict:
     """Campaign attempts (protocol v5.3): every wait is bounded by the attempt deadline."""
     deadline = getattr(args, "deadline_s", None)
@@ -377,14 +398,9 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                     if res.get("ack_verified"):
                         res["delivery_time_s"] = seconds_between(t_cmd, t_ack)
                 if b0 is None:
-                    if args.condition and res.get("ack_verified"):
-                        # Phase 1 success is B's verified payload plus A's verified ACK; B's ACK
-                        # (which carries the payload's SHA-256) proves delivery even if the modem
-                        # never reported BUFFER 0 before it (seen with Mercury in Poor).
-                        warnings.append("BUFFER 0 was not observed before B's ACK arrived; the ACK "
-                                        "shows the delivery")
-                    else:
-                        failures.append("BUFFER 0 was not observed after writing (timeout or socket closed)")
+                    # Raw evidence, kept as in every earlier version. Phase 1 judges it below
+                    # (counted_success) as a warning when B's ACK was verified.
+                    failures.append(BUFFER0_MISSING)
                 # The session is active, so DISCONNECT must be accepted.
                 responses["disconnect"] = send_command(cmd, "DISCONNECT", win)
                 judge_command(responses["disconnect"], "DISCONNECT", failures, warnings, req)
@@ -400,6 +416,8 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     res["sender_completed"] = not failures
     if args.ack:
         res["sender_completed"] = res["sender_completed"] and res.get("ack_verified") is True
+    if args.condition:
+        phase1_sender_judgement(res)
     return res
 
 
@@ -569,7 +587,8 @@ def main() -> int:
         cmd = TcpCapture(str(m["cmd_port"]), m["host"], m["cmd_port"], rlog, line_mode=True)
         data = TcpCapture(str(m["data_port"]), m["host"], m["data_port"], rlog, line_mode=False)
         res = (run_send if args.mode == "send" else run_listen)(args, cfg, rlog, cmd, data)
-        exit_code = 0 if (res.get("sender_completed") or res.get("delivered_intact")) else 1
+        exit_code = 0 if (res.get("sender_completed") or res.get("delivered_intact")
+                          or res.get("sender_counted_success")) else 1
     except Exception as e:  # noqa: BLE001 - the full error is recorded
         res["exception"] = traceback.format_exc()
         res["failures"] = res.get("failures", []) + [f"exception: {e!r}"]
