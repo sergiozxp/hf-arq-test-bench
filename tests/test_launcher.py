@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -271,6 +272,106 @@ def main() -> int:
         report = json.loads(Path(pairing.stdout.split("Report saved to:")[1].strip()).read_text(encoding="utf-8"))
         check(report["counts"] == {"passed": 9} and report["outcome"] == "passed" and not report["unpaired"],
               "the session cross-check pairs all 9 tests of the sequence")
+
+        # Fourth session: a Phase 1 cell (3 attempts) with a simulator log on PC B.
+        cell_configs = {}
+        for local, peer, command_port, data_port in (("A", "B", 18300, 18301), ("B", "A", 19300, 19301)):
+            (temporary / f"results_C{local}").mkdir()
+            path = temporary / f"config_cell_{local}.toml"
+            path.write_text(CONFIG.format(results=temporary / f"results_C{local}", command_port=command_port,
+                                          data_port=data_port, local=local, peer=peer), encoding="utf-8")
+            cell_configs[local] = path
+        cell_args = ["--campaign", "moderate", "--load", "200B", "--attempts", "3", "--series", "KIT"]
+        receiver = subprocess.Popen(
+            launcher + ["smoke_sequence.py", "listen", "--config", str(cell_configs["B"]), *cell_args],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+        )
+        cell_lines: list[str] = []
+        reader = threading.Thread(target=lambda: [cell_lines.append(l) for l in receiver.stdout], daemon=True)
+        reader.start()
+        deadline = time.time() + 150
+        while time.time() < deadline and not any("waiting_for_connection" in l for l in cell_lines):
+            time.sleep(0.5)
+        cell_sender = subprocess.run(
+            launcher + ["smoke_sequence.py", "send", "--config", str(cell_configs["A"]), *cell_args,
+                        "--gap-s", "3", "--ack-extra-s", "2"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+        )
+        receiver.wait(timeout=300)
+        reader.join(timeout=10)
+        check("CELL FINISHED" in cell_sender.stdout and receiver.returncode == 0, "a Phase 1 cell runs 3 attempts")
+        a_runs = sorted(glob.glob(str(temporary / "results_CA" / "p1" / "KIT-moderate-200B-*" / "result.json")))
+        check(len(a_runs) == 3, "three attempts are recorded under p1/")
+        first = json.loads(Path(a_runs[0]).read_text(encoding="utf-8"))
+        check(first.get("ack_verified") is True and first.get("delivery_time_s") and first.get("deadline_s") == 600
+              and first.get("condition") == "moderate", "each attempt records its ACK, delivery time and deadline")
+        sim_dir = temporary / "results_CB" / "simulator" / "20261024T000000Z_moderate"
+        sim_dir.mkdir(parents=True)
+        lines = []
+        for k, run in enumerate(a_runs, start=1):
+            stamp = Path(run).parent.name.split("_")[-2]
+            start = (datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+                     + timedelta(seconds=1)).isoformat()
+            lines.append(json.dumps({"event": "attempt_start", "attempt": k, "t_utc": start, "mode": "moderate"}))
+            lines.append(json.dumps({"event": "attempt_end", "attempt": k, "started_utc": start, "mode": "moderate",
+                                     "valid": True, "problems": []}))
+        (sim_dir / "sim_log.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        pairing = subprocess.run(
+            launcher + ["smoke_cross_check.py", "--pair", str(temporary / "results_CA"), str(temporary / "results_CB")],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        report = json.loads(Path(pairing.stdout.split("Report saved to:")[1].strip()).read_text(encoding="utf-8"))
+        cell = report["cells"][0]
+        check(len(report["cells"]) == 1 and cell["counted"] == 3 and cell["successes"] == 3
+              and cell["median_delivery_s"] is not None and report["outcome"] == "passed",
+              "the cell report counts 3/3 with the simulator's attempts")
+        check((Path(pairing.stdout.split("Report saved to:")[1].strip()).parent / "phase1_cells.csv").is_file(),
+              "the cell table is written as CSV")
+        # Fifth session: a block (repeat) driven by a cross-check, with PC B announcing to the simulator.
+        arm = first.get("arm")
+        created = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        rows = [{"arm": arm, "series": "KIT", "condition": "moderate", "load": "200B", "attempt": k,
+                 "outcome": "not_counted" if k == 2 else "passed"} for k in range(1, 11)]
+        for side in ("CA", "CB"):
+            folder = temporary / f"results_{side}" / "cross_checks" / "29991231T000000Z"
+            folder.mkdir(parents=True)
+            (folder / "cross_check_report.json").write_text(json.dumps({"created_utc": created, "pairs": rows}),
+                                                           encoding="utf-8")
+        auto_dir = temporary / "results_CB" / "simulator" / "29991231T000000Z_auto"
+        auto_dir.mkdir(parents=True)
+        (temporary / "results_CB" / "simulator" / "modem_power.json").write_text(json.dumps({arm: {}}), encoding="utf-8")
+        (auto_dir / "status.json").write_text(json.dumps({"t_utc": datetime.now(timezone.utc).isoformat(),
+                                                          "mode": "auto"}), encoding="utf-8")
+        receiver = subprocess.Popen(
+            launcher + ["smoke_sequence.py", "listen", "--config", str(cell_configs["B"]), "--block", "repeat",
+                        "--no-zip"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+        )
+        block_lines: list[str] = []
+        reader = threading.Thread(target=lambda: [block_lines.append(l) for l in receiver.stdout], daemon=True)
+        reader.start()
+        deadline = time.time() + 150
+        while time.time() < deadline and not any("waiting_for_connection" in l for l in block_lines):
+            time.sleep(0.5)
+        block_args = ["--block", "repeat", "--no-zip", "--gap-s", "3", "--ack-extra-s", "2"]
+        block_sender = subprocess.run(
+            launcher + ["smoke_sequence.py", "send", "--config", str(cell_configs["A"]), *block_args],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+        )
+        receiver.wait(timeout=300)
+        reader.join(timeout=10)
+        check("First: KIT-moderate-200B-02" in block_sender.stdout and "BLOCK REPEAT COMPLETED" in block_sender.stdout
+              and receiver.returncode == 0, "a repeat block runs the not-counted attempt on both PCs")
+        announced = json.loads((temporary / "results_CB" / "simulator" / "announce.json").read_text(encoding="utf-8"))
+        check(announced["tag"] == "KIT-moderate-200B-02" and announced["state"] == "finished"
+              and announced["attempt"] == 2 and announced["arm"] == arm,
+              "PC B announced the attempt to the simulator and its end")
+        again = subprocess.run(
+            launcher + ["smoke_sequence.py", "send", "--config", str(cell_configs["A"]), *block_args],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        check("nothing left to run" in again.stdout, "running the block again resumes: nothing left to run")
+        check((temporary / "results_CA" / "arm_settings.json").is_file(), "the block records the arm's settings")
     finally:
         mock.kill()
     print("ALL LAUNCHER TESTS PASSED")

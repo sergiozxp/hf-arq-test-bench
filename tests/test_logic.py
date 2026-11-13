@@ -36,7 +36,7 @@ check(
 )
 
 config = tomllib.loads(logic.config_text(values))
-check(config["general"]["protocol_version"] == "5.2", "protocol version is written")
+check(config["general"]["protocol_version"] == "5.3", "protocol version is written")
 check(config["general"]["smoke_profile"] == "MS-1.0", "smoke profile is written")
 check("pat" not in config and config["modem"] == {"name": "mercury", "arm": "Mercury 1.9.19"}, "Mercury configuration names the modem and arm")
 check(config["binaries"]["mercury_zip"] == values["mercury_zip"], "Windows path is preserved")
@@ -169,4 +169,33 @@ session = {"pairs": [{}], "counts": {"passed": 1}, "unpaired": [], "crossed_runs
            "stopped_runs": [{"dir": "x"}], "calibration": {"latest": {"A->B": {"sinad_db": 58.0, "verdict": "ok"}}}}
 text = logic.summarize(session)[0]
 check("1 stopped run" in text and "A->B SINAD 58.0" in text, "session summary lists stopped runs and calibration")
+
+# Phase 1 cells
+check(logic.TEST_CHOICES[2:5] == list(logic.BLOCK_TESTS) and logic.TEST_CHOICES[5] == logic.KIT_TEST
+      and len(logic.CAMPAIGN_TESTS) == 10, "three blocks, then the kit, two pilots, six campaign cells and the verification")
+check(logic.campaign_commands("B", logic.VERIFY_TEST, 1)[0][logic.campaign_commands("B", logic.VERIFY_TEST, 1)[0].index("--series") + 1]
+      == "VERIFY" and logic.campaign_tag("poor", "200B", 1, "VERIFY") == "VERIFY-poor-200B-01",
+      "verification series VERIFY-poor-200B-01..10, the same traces as the pilot")
+check(logic.block_commands("B", logic.BLOCK_CAMPAIGN) == [["smoke_sequence.py", "listen", "--block", "campaign"]]
+      and logic.block_commands("A", logic.BLOCK_PILOT)[0][:4] == ["smoke_sequence.py", "send", "--block", "pilot"],
+      "block commands")
+check("180 attempts" in logic.test_tag(logic.BLOCK_CAMPAIGN, 1) and "20 attempts" in logic.test_tag(logic.BLOCK_PILOT, 1),
+      "block labels count their attempts")
+text, color = logic.summarize({"mode": "listen", "planned_steps": 3, "steps": [{}] * 3, "completed_steps": 3,
+                               "outcome": "stopped", "stop_reason": "3 attempts in a row point to the bench.",
+                               "block": {"kind": "campaign", "arm": "Mercury 1.9.19"}, "skipped_done": 5})
+check(color == "red" and "resumes" in text, "a stopped block says how to resume")
+pilot = "PILOT  Poor, 200 B, 10 attempts (exploratory)"
+check(logic.campaign_commands("A", pilot)[0][-5:-2] == ["--series", "PILOT", "--from"] or
+      "PILOT" in logic.campaign_commands("A", pilot)[0], "the pilot runs as its own series")
+check(logic.campaign_tag("poor", "200B", 3, "PILOT") == "PILOT-poor-200B-03", "pilot tags never mix with P1")
+check(logic.campaign_tag("moderate", "200B", 7) == "P1-moderate-200B-07", "campaign tag carries condition, load and attempt")
+check(logic.campaign_commands("B", logic.KIT_TEST, 4) == [["smoke_sequence.py", "listen", "--campaign", "moderate",
+                                                        "--load", "200B", "--attempts", "10", "--series", "KIT",
+                                                        "--from", "4"]],
+      "PC B runs the kit from attempt 4")
+check("--gap-s" in logic.campaign_commands("A", "P1  Poor, 10 KiB, 30 attempts")[0], "PC A runs a cell with its gap")
+check(logic.summarize({"mode": "send", "steps": [{}, {}], "completed_steps": 1, "planned_steps": 2,
+                       "outcome": "completed", "campaign": {"condition": "poor", "load": "200B"}})[0]
+      .startswith("CELL P1 poor 200B FINISHED"), "a finished cell is summarised")
 print("ALL LOGIC TESTS PASSED")

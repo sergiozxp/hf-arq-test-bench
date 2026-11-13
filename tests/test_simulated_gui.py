@@ -41,7 +41,7 @@ class Root(Widget):
 
 
 tk = types.ModuleType("tkinter")
-tk.Tk, tk.StringVar, tk.IntVar = Root, Variable, Variable
+tk.Tk, tk.StringVar, tk.IntVar, tk.Toplevel = Root, Variable, Variable, Root
 tk.TclError = RuntimeError
 for name in ("Text", "Label", "Button"):
     setattr(tk, name, Widget)
@@ -65,15 +65,18 @@ import smoke_gui
 
 window = smoke_gui.ModemSmokeWindow()
 assert window.test_name.get() == smoke_gui.logic.SEQUENCE_TEST, "the full sequence is the default"
-assert window.repeat_mode is True
+assert window.repeat_mode == ("sequence", 0)
 window.test_name.set(smoke_gui.logic.H1_TEST)
 window._test_changed()
-assert window.repeat_mode is False and window.repeat.get() == 1
+assert window.repeat_mode == ("h1", 0) and window.repeat.get() == 1
 window.test_name.set(smoke_gui.logic.SEQUENCE_TEST)
 window._test_changed()
 window.repeat.set(7)
 window._test_changed()
-assert window.repeat_mode is True and window.repeat.get() == 7, "the start step is kept"
+assert window.repeat_mode == ("sequence", 0) and window.repeat.get() == 7, "the start step is kept"
+window.test_name.set(smoke_gui.logic.KIT_TEST)
+window._test_changed()
+assert window.repeat_mode == ("campaign", 10) and window.repeat.get() == 1
 assert window.values["sound_system"].get() == "wasapi"
 assert not window.mercury.running()
 assert smoke_gui.device_labels([{"name": "X"}, {"name": "X"}, {"name": "Y"}]) == ["X", "X  [2]", "Y"]
@@ -124,6 +127,29 @@ window.vara_info = {"settings": {"input_device": "UCA222-A (USB Audio CODEC )",
 assert window.calibration_devices({}) == ("UCA222-A (USB Audio CODEC )", "UCA222-A (USB Audio CODEC )")
 window.test_name.set(smoke_gui.logic.SEQUENCE_TEST)
 window._test_changed()
+
+# Channel simulator window and its control helpers.
+import sim_control
+window.values["role"].set("B")
+window.simulator_window = None
+window._open_simulator()
+sim = window.simulator_window
+assert not sim.running()
+assert sim_control.run_command("UCA222-S (USB Audio CODEC )", "UCA222-S (USB Audio CODEC )", "moderate", 7)[:2] \
+    == ["channel_sim.py", "run"]
+text, color = sim_control.describe_status({"mode": "moderate", "attempt": 7, "seconds_since_audio": 3.0,
+                                           "xruns_total": {"input_overflow": 0, "output_underflow": 0},
+                                           "directions": {"A->B": {"peak_vs_reference_db": 0.2, "active_s": 9,
+                                                                   "output_clipped_samples": 0}}})
+assert color == "green" and "attempt 7" in text, text
+assert sim_control.describe_status({"mode": "poor", "attempt": 1, "xruns_total": {"output_underflow": 1},
+                                    "directions": {}})[1] == "red"
+assert sim_control.describe_reference(None)[1] == "orange"
+dead = sim_control.describe_status({"mode": "transparent", "attempt": None, "xruns_total": {},
+                                    "directions": {"A->B": {"input_peak_dbfs": -90.31, "active_s": 0},
+                                                   "B->A": {"input_peak_dbfs": -90.31, "active_s": 0}}})
+assert dead[1] == "red" and "NO SIGNAL" in dead[0]
+assert sim_control.log_folder("x\nSimulator log: results/simulator/abc\n", Path("/w")) == Path("/w/results/simulator/abc")
 
 # The output of a full sequence: progress per test, a result per test, then the record.
 import json

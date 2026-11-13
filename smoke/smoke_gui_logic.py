@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 
-APP_VERSION = "0.2.0-alpha.4"
+APP_VERSION = "0.2.0-alpha.5"
 CALLSIGN_RE = re.compile(r"^[A-Z0-9/-]{3,12}$")
 BANDWIDTHS = ["BW500", "BW2300"]
 MODEMS = {"mercury": "Mercury 1.9.19", "vara": "VARA HF 4.9.0"}
@@ -43,6 +43,10 @@ def validate_form(values: dict) -> list[str]:
             if ssid(values.get(field, "")) in VARA_SPECIAL_SSIDS:
                 errors.append(f"{values[field]}: VARA treats -T, -R, -X and -L as special "
                               "extensions. Use a numeric SSID such as -1 and -2.")
+            elif ssid(values.get(field, "")) and not re.fullmatch(r"\d{1,2}", ssid(values[field])):
+                # 2026-11-12: VARA answered WRONG to MYCALL XQ2CG-A and XQ2CG-B.
+                errors.append(f"{values[field]}: VARA accepts only a numeric SSID (-0 to -15). "
+                              "Use for example -1 on PC A and -2 on PC B.")
     return errors
 
 
@@ -51,7 +55,8 @@ def callsign_notes(values: dict) -> list[str]:
     notes = []
     if values.get("modem", "mercury") == "mercury":
         for field in ("mycall", "peer_call"):
-            if ssid(values.get(field, "").upper()) in VARA_SPECIAL_SSIDS:
+            sfx = ssid(values.get(field, "").upper())
+            if sfx and not re.fullmatch(r"\d{1,2}", sfx):
                 notes.append(f"{values[field]}: VARA cannot use this SSID. To use the same "
                              "callsigns in every arm, prefer numeric SSIDs (-1, -2).")
     return notes
@@ -113,7 +118,7 @@ def config_text(values: dict, session: dict | None = None, vara: dict | None = N
 results_dir = "results"
 payload_seed = 20261021
 max_payload_bytes = 1048576
-protocol_version = "5.2"
+protocol_version = "5.3"
 smoke_profile = "MS-1.0"
 app_version = {_toml_str(APP_VERSION)}
 
@@ -192,7 +197,45 @@ SEQUENCE = [
 ]
 SEQUENCE_GAP_S = 45
 CALIBRATION_TEST = "CAL  Bench calibration: both audio paths (modems stopped)"
-TEST_CHOICES = [SEQUENCE_TEST, CALIBRATION_TEST, *MERCURY_TESTS]
+
+# Phase 1 (protocol v5.3): one campaign cell = one condition and one load, N attempts with
+# the same-session ACK and a deadline. The tag carries the attempt number, which is also
+# the simulator's attempt number (and so the seeds).
+CAMPAIGN_LOADS = {"200B": 200, "10KiB": 10240}
+CAMPAIGN_DEADLINE_S = {"200B": 600, "10KiB": 3600}
+CAMPAIGN_LOAD_LABELS = {"200B": "200 B", "10KiB": "10 KiB"}
+CAMPAIGN_CONDITIONS = {"good": "Good", "moderate": "Moderate", "poor": "Poor"}
+# Three series with the same seeds for attempt k, kept apart by their tag prefix so that
+# the kit and the pilot never mix with the campaign cells in a report.
+KIT_TEST = "KIT  Minimum replication kit: Moderate, 200 B, 10 attempts"
+CAMPAIGN_TESTS = {KIT_TEST: dict(series="KIT", condition="moderate", load="200B", attempts=10)}
+for _cond, _label in (("good", "Good"), ("poor", "Poor")):
+    CAMPAIGN_TESTS[f"PILOT  {_label}, 200 B, 10 attempts (exploratory)"] = dict(
+        series="PILOT", condition=_cond, load="200B", attempts=10)
+for _cond, _label in CAMPAIGN_CONDITIONS.items():
+    for _load in CAMPAIGN_LOADS:
+        CAMPAIGN_TESTS[f"P1  {_label}, {CAMPAIGN_LOAD_LABELS[_load]}, 30 attempts"] = dict(
+            series="P1", condition=_cond, load=_load, attempts=30)
+# Verification of the Phase 1 success rule on the bench (2026-11-12): the same ten Poor
+# traces as the pilot, in a series of its own that is never mixed with PILOT or P1.
+VERIFY_TEST = "VERIFY  Poor, 200 B, 10 attempts (verification of the success rule)"
+CAMPAIGN_TESTS[VERIFY_TEST] = dict(series="VERIFY", condition="poor", load="200B", attempts=10)
+CAMPAIGN_GAP_S = SEQUENCE_GAP_S + 60     # every attempt ends with the same-session ACK
+SERIES_ATTEMPTS = {"KIT": 10, "PILOT": 10, "P1": 30, "VERIFY": 10}
+
+# Blocks (alpha.5): every remaining run of one stage for the modem in use, with one RUN per
+# PC. The plan is fixed; each PC skips the attempts it has already completed for this arm,
+# so pressing RUN again resumes a stopped block. The simulator follows PC B's announcements.
+BLOCK_PILOT = "BLOCK  Pilot for this modem: Good and Poor, 200 B, 10 attempts each"
+BLOCK_CAMPAIGN = "BLOCK  Campaign for this modem: the 6 P1 cells, 30 attempts each"
+BLOCK_REPEAT = "BLOCK  Repeat missing and not-counted attempts (from the last cross-check)"
+BLOCK_TESTS = {BLOCK_PILOT: "pilot", BLOCK_CAMPAIGN: "campaign", BLOCK_REPEAT: "repeat"}
+BLOCK_CELLS = {
+    "pilot": [("PILOT", "good", "200B"), ("PILOT", "poor", "200B")],
+    "campaign": [("P1", cond, load) for cond in CAMPAIGN_CONDITIONS for load in CAMPAIGN_LOADS],
+}
+
+TEST_CHOICES = [SEQUENCE_TEST, CALIBRATION_TEST, *BLOCK_TESTS, *CAMPAIGN_TESTS, *MERCURY_TESTS]
 SEQUENCE_LABEL = f"Start at step (1–{len(SEQUENCE)}):"
 SEQUENCE_HINT = ("Normally 1. Use a later step only to finish a stopped sequence; "
                  "use the same step on PC A and PC B.")
@@ -200,6 +243,45 @@ SEQUENCE_HINT = ("Normally 1. Use a later step only to finish a stopped sequence
 
 def is_sequence(test_name: str) -> bool:
     return test_name == SEQUENCE_TEST
+
+
+def is_campaign(test_name: str) -> bool:
+    return test_name in CAMPAIGN_TESTS
+
+
+def campaign_tag(condition: str, load: str, attempt: int, series: str = "P1") -> str:
+    return f"{series}-{condition}-{load}-{attempt:02d}"
+
+
+def campaign_commands(role: str, test_name: str, start: int = 1) -> list[list[str]]:
+    cell = CAMPAIGN_TESTS[test_name]
+    mode = "send" if role == "A" else "listen"
+    command = ["smoke_sequence.py", mode, "--campaign", cell["condition"], "--load", cell["load"],
+               "--attempts", str(cell["attempts"]), "--series", cell["series"], "--from", str(start)]
+    if mode == "send":
+        command += ["--gap-s", f"{SEQUENCE_GAP_S:g}"]
+    return [command]
+
+
+def is_block(test_name: str) -> bool:
+    return test_name in BLOCK_TESTS
+
+
+def block_commands(role: str, test_name: str) -> list[list[str]]:
+    mode = "send" if role == "A" else "listen"
+    command = ["smoke_sequence.py", mode, "--block", BLOCK_TESTS[test_name]]
+    if mode == "send":
+        command += ["--gap-s", f"{SEQUENCE_GAP_S:g}"]
+    return [command]
+
+
+def block_label(kind: str) -> str:
+    if kind == "repeat":
+        return "the missing and not-counted attempts of this modem (from the last cross-check)"
+    cells = BLOCK_CELLS[kind]
+    total = sum(SERIES_ATTEMPTS[s] for s, _c, _l in cells)
+    return (f"the {kind} block, {len(cells)} cell(s), {total} attempts: "
+            + ", ".join(f"{s}-{c}-{l}" for s, c, l in cells))
 
 
 def is_calibration(test_name: str) -> bool:
@@ -219,6 +301,12 @@ def test_tag(test_name: str, repetition: int) -> str:
         return sequence_label(repetition)
     if is_calibration(test_name):
         return "the bench calibration"
+    if is_block(test_name):
+        return block_label(BLOCK_TESTS[test_name])
+    if is_campaign(test_name):
+        cell = CAMPAIGN_TESTS[test_name]
+        return (f"the Phase 1 cell {campaign_tag(cell['condition'], cell['load'], repetition, cell['series'])[:-3]}, "
+                f"attempts {repetition}–{cell['attempts']}")
     preset = MERCURY_TESTS[test_name]
     return preset["tag"].replace("{n}", str(repetition))
 
@@ -333,6 +421,26 @@ def summarize_sequence(report: dict) -> tuple[str, str]:
     """Summarise one PC's run of the full sequence."""
     side = "SENDER" if report.get("mode") == "send" else "RECEIVER"
     done, planned = report.get("completed_steps", 0), report.get("planned_steps", 0)
+    block = report.get("block")
+    if block:
+        run = len(report.get("steps") or [])
+        skipped = report.get("skipped_done", 0)
+        zip_note = f" Results ZIP: {report['zip']}." if report.get("zip") else ""
+        if report.get("outcome") == "stopped":
+            return (f"BLOCK {block['kind'].upper()} STOPPED ({side}): {report.get('stop_reason')} "
+                    f"{run} attempt(s) run. Fix the bench, then press RUN again on PC B and PC A: the "
+                    f"block resumes where it stopped.{zip_note}", "red")
+        if report.get("outcome") == "nothing_to_do":
+            return (f"BLOCK {block['kind'].upper()} ({side}): nothing left to run for {block.get('arm')} "
+                    f"({skipped} attempt(s) already done).", "green")
+        return (f"BLOCK {block['kind'].upper()} FINISHED ({side}, {block.get('arm')}): {run} attempt(s) run, "
+                f"{skipped} already done before.{zip_note} Next: exchange the ZIPs and cross-check on both "
+                "PCs.", "orange")
+    cell = report.get("campaign")
+    if cell:
+        return (f"CELL {cell.get('series', 'P1')} {cell['condition']} {cell['load']} FINISHED ({side}): {len(report.get('steps') or [])} "
+                f"attempt(s) run. Successes and failures are counted by the cross-check with the other PC's "
+                f"ZIP.", "orange")
     if report.get("outcome") == "completed":
         note = (" Delivery is verified only by the cross-check." if side == "SENDER"
                 else " Every payload hash verified.")
@@ -349,6 +457,26 @@ def summarize_report(report: dict) -> tuple[str, str]:
     """Summarise a session cross-check report (all pairs of one session)."""
     counts = report.get("counts") or {}
     parts = [f"{n} {outcome}" for outcome, n in sorted(counts.items())]
+    cells = report.get("cells") or []
+    if cells:
+        lines = []
+        for c in cells:
+            low, high = c["wilson_95"]
+            rate = "—" if c["success_rate"] is None else f"{c['success_rate'] * 100:.0f} %"
+            interval = "" if low is None else f" (95 % {low * 100:.0f}–{high * 100:.0f} %)"
+            med = "" if c["median_delivery_s"] is None else f", median {c['median_delivery_s']:.0f} s"
+            if c.get("median_effective_snr_db") is not None:
+                med += f", SNR {c['median_effective_snr_db']:+.1f} dB"
+            extra = f", {len(c['not_counted'])} not counted" if c["not_counted"] else ""
+            if c.get("successes_without_buffer0"):
+                extra += f", {c['successes_without_buffer0']} success(es) without BUFFER 0 (warning)"
+            lines.append(f"{c.get('series', 'P1')} · {c['arm']} · {c['condition']} · {c['load']}: "
+                         f"{c['successes']}/{c['counted']} = "
+                         f"{rate}{interval}{med}{extra}")
+        text = "PHASE 1 CELLS: " + "; ".join(lines)
+        if report.get("crossed_runs") or report.get("unpaired"):
+            text += ". Some runs are crossed or without a partner: see the log"
+        return text + ".", "green" if report.get("outcome") == "passed" else "orange"
     text = f"SESSION CROSS-CHECK: {len(report.get('pairs') or [])} pair(s): " + (", ".join(parts) or "none")
     crossed = report.get("crossed_runs") or []
     unpaired = report.get("unpaired") or []
@@ -384,6 +512,7 @@ SCRIPTS = {
     "smoke_cross_check.py": "smoke_cross_check",
     "smoke_sequence.py": "smoke_sequence",
     "bench_calibration.py": "bench_calibration",
+    "channel_sim.py": "channel_sim",
 }
 
 

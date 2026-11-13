@@ -41,6 +41,11 @@ info = vara.inspect(exe)
 check(info["registered"] is True and info["licence_callsigns"] == ["XQ2CG"], "licence state is read")
 check(SECRET not in json.dumps(info), "the registration code is never returned")
 check(info["settings"]["tcp_command_port"] == 8300 and info["settings"]["channel"] == "1", "settings are read")
+info_any = dict(info, exe_sha256="42b217d9" * 8)
+any_errors, any_warnings = vara.setting_notes(info_any, "XQ2CG-1")
+check(any_errors == [] and any("42b217d9" in w for w in any_warnings),
+      "any VARA version is accepted; its hash is shown to compare with the other PC")
+info.pop("exe_sha256", None)
 errors, warnings = vara.setting_notes(info, "XQ2CG-1")
 check(errors == [] and warnings == [], "a clean registered setup has no notes")
 _, warnings = vara.setting_notes(info, "EA5ABC-1")
@@ -49,7 +54,7 @@ check(any("registered for" in w for w in warnings), "a callsign outside the lice
 unregistered = INI.replace(SECRET, "").replace("Updates=0", "Updates=1").replace("TCP Command Port=8300",
                                                                                  "TCP Command Port=8500")
 ini.write_bytes(unregistered.encode("latin-1"))
-info2 = vara.inspect(exe)
+info2 = {k: v for k, v in vara.inspect(exe).items() if k != "exe_sha256"}
 errors, warnings = vara.setting_notes(info2)
 check(info2["registered"] is False, "an empty code means unregistered")
 check(errors and "8500" in errors[0], "a different TCP port is an error")

@@ -25,6 +25,7 @@ WHAT IT DOES NOT
 """
 from __future__ import annotations
 
+from mercury_smoke_client import has_setup_fault
 import csv
 import json
 import re
@@ -38,6 +39,11 @@ RUN_DIR_RE = re.compile(r"^(?P<tag>.+)_(?P<start>\d{8}T\d{6}Z)_(?P<rid>[0-9a-f]{
 # sender start minus receiver start). The negative margin absorbs clock offset.
 PAIR_WINDOW_S = (-120, 600)
 CROSSED_WINDOW_S = 120
+P1_TAG_RE = re.compile(r"^(?P<series>P1|KIT|PILOT|VERIFY)-(?P<condition>[a-z]+)-(?P<load>[0-9A-Za-z]+)-(?P<attempt>\d+)$")
+# The simulator runs on PC B, so its attempts are matched against PC B's runs (same clock):
+# attempt k starts on PC A's first audio, after PC B's run k started listening.
+SIM_EARLY_S = 0
+WILSON_Z = 1.96
 
 
 def _get(result: dict, *keys):
@@ -73,6 +79,11 @@ def pair_mismatches(em: dict, rx: dict) -> list[str]:
             continue
         if a != b:
             reasons.append(f"different {label}: {a} / {b}")
+    a_bin, b_bin = em.get("modem_binary_sha256"), rx.get("modem_binary_sha256")
+    if a_bin and b_bin and a_bin != b_bin:
+        reasons.append(f"different modem binaries: {a_bin[:12]}… / {b_bin[:12]}… (same version on both PCs)")
+    if em.get("condition") != rx.get("condition"):
+        reasons.append(f"different channel condition: {em.get('condition')} / {rx.get('condition')}")
     if bool(em.get("ack_mode")) != bool(rx.get("ack_mode")):
         reasons.append(f"same-session ACK on one side only: sender {bool(em.get('ack_mode'))}, "
                        f"receiver {bool(rx.get('ack_mode'))}")
@@ -122,7 +133,24 @@ def cross_check(em: dict, rx: dict) -> dict:
         "protocol_version": em.get("protocol_version") or rx.get("protocol_version"),
         "smoke_profile": em.get("smoke_profile") or rx.get("smoke_profile"),
     }
-    delivered = bool(hash_ok and rx.get("delivered_intact") and em.get("sender_completed"))
+    sender_ok = em.get("sender_completed")
+    phase1 = bool(em.get("ack_mode") and em.get("condition"))
+    if phase1:
+        # Phase 1 (design section 4). The raw sender_completed is kept as recorded; the
+        # derived judgement is A's part of counted_success: ACK verified before the deadline,
+        # no infrastructure or procedure fault, no failure other than a missing BUFFER 0.
+        # Results written before the client recorded it are judged the same way here.
+        if "sender_counted_success" in em:
+            sender_ok = em["sender_counted_success"]
+        else:
+            others = [f for f in em.get("failures") or [] if not f.startswith("BUFFER 0 was not observed")]
+            sender_ok = bool(em.get("ack_verified") is True and not em.get("deadline_reached")
+                             and not em.get("infrastructure_fault") and not em.get("procedure_fault")
+                             and not others)
+        if sender_ok and not em.get("arq_confirmed"):
+            warnings.append("BUFFER 0 not observed by A; B's verified ACK shows the delivery "
+                            "(warning, not a failure)")
+    delivered = bool(hash_ok and rx.get("delivered_intact") and sender_ok)
     if em.get("ack_mode"):
         # E0-3: delivery also requires A to have verified B's ACK in the same session.
         result["sender_ack_verified"] = em.get("ack_verified")
@@ -138,13 +166,18 @@ def cross_check(em: dict, rx: dict) -> dict:
         result["outcome"] = "invalid_pair"
     elif em.get("infrastructure_fault") or rx.get("infrastructure_fault"):
         result["outcome"] = "infrastructure_fault"
-    elif em.get("procedure_fault") or rx.get("procedure_fault"):
+    elif has_setup_fault(em) or has_setup_fault(rx):
         result["outcome"] = "procedure_fault"
     elif not delivered:
         result["outcome"] = "failed"
     else:
         # "incomplete": delivery verified, but evidence that MS-1.0 requires is missing.
         result["outcome"] = "incomplete" if incomplete else "passed"
+    if phase1:
+        result["sender_completed"] = em.get("sender_completed")      # raw, as recorded
+        result["sender_counted_success"] = sender_ok
+        result["counted_success"] = result["outcome"] == "passed"
+        result["buffer0_missing"] = not em.get("arq_confirmed")
     return result
 
 
@@ -218,6 +251,147 @@ def find_calibrations(root: Path, origin: str) -> list[dict]:
     return found
 
 
+def find_simulator_attempts(root: Path, origin: str) -> list[dict]:
+    """Attempts recorded by the channel simulator (results/simulator/*/sim_log.jsonl)."""
+    attempts = []
+    for log in sorted(root.rglob("sim_log.jsonl")):
+        if "cross_checks" in log.relative_to(root).parts:
+            continue
+        starts, ends = {}, {}
+        try:
+            for line in log.read_text(encoding="utf-8").splitlines():
+                record = json.loads(line)
+                if record.get("event") == "attempt_start":
+                    starts[(record["attempt"], record["t_utc"])] = record
+                elif record.get("event") == "attempt_end":
+                    ends[(record["attempt"], record.get("started_utc"))] = record
+        except (OSError, ValueError, KeyError):
+            continue
+        for key, start in starts.items():
+            end = ends.get(key)
+            directions = (end or {}).get("directions") or {}
+            attempts.append({"log": log.parent.name, "pc": origin, "attempt": start["attempt"],
+                             "mode": start.get("mode"), "arm": start.get("arm"),
+                             "snr_reference": start.get("snr_reference"), "tag": start.get("tag"),
+                             "effective_snr_db": {d: v.get("effective_snr_db") for d, v in directions.items()},
+                             "start": datetime.fromisoformat(start["t_utc"]),
+                             "valid": bool(end and end.get("valid")),
+                             "problems": (end or {}).get("problems") or
+                             ([] if end else ["the simulator stopped before the attempt ended"])})
+    return attempts
+
+
+def wilson(successes: int, n: int, z: float = WILSON_Z) -> tuple[float | None, float | None]:
+    if n == 0:
+        return None, None
+    p = successes / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * (p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5 / denom
+    return round(max(0.0, centre - half), 4), round(min(1.0, centre + half), 4)
+
+
+def median(values: list[float]) -> float | None:
+    values = sorted(values)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+def attach_simulator(row: dict, sender: dict, receiver: dict, sim_attempts: list[dict]) -> None:
+    """Phase 1 pairs: the simulator attempt must exist, match and be valid, or the pair is not counted."""
+    match = P1_TAG_RE.match(sender["tag"])
+    if not match:
+        return
+    condition, attempt = match.group("condition"), int(match.group("attempt"))
+    row.update(series=match.group("series"), condition=condition, load=match.group("load"), attempt=attempt,
+               delivery_time_s=sender["result"].get("delivery_time_s"),
+               modem_binary_sha256=sender["result"].get("modem_binary_sha256"),
+               deadline_reached=bool(sender["result"].get("deadline_reached")))
+    limit = (sender["result"].get("deadline_s") or 3600) + 300
+    near = sorted((a for a in sim_attempts
+                   if -SIM_EARLY_S <= (a["start"] - receiver["start"]).total_seconds() <= limit),
+                  key=lambda a: a["start"])
+    reasons = []
+    if not near:
+        reasons.append("no simulator attempt starts while PC B's run was listening")
+    else:
+        sim = near[0]
+        row["simulator"] = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in sim.items()}
+        if sim["mode"] != condition:
+            reasons.append(f"the simulator ran '{sim['mode']}', the run is '{condition}'")
+        row["snr_reference"] = sim.get("snr_reference")
+        row["effective_snr_db"] = (sim.get("effective_snr_db") or {}).get("A->B")
+        if sim.get("snr_reference") == "rms" and sim.get("arm") and sim["arm"] != row.get("arm"):
+            reasons.append(f"the simulator's noise was set for {sim['arm']}, the run is {row.get('arm')}")
+        if sim.get("tag") and sim["tag"] != sender["tag"]:
+            reasons.append(f"PC B announced {sim['tag']} to the simulator, the run is {sender['tag']}")
+        if sim["attempt"] != attempt:
+            reasons.append(f"the simulator used attempt {sim['attempt']}'s trace for attempt {attempt}")
+        if not sim["valid"]:
+            reasons.extend(sim["problems"] or ["simulator attempt not valid"])
+    if reasons and row["outcome"] in ("passed", "failed"):
+        row["attempt_outcome"] = row["outcome"]
+        row["outcome"] = "not_counted"
+        row["not_counted_reasons"] = reasons
+
+
+def cell_table(rows: list[dict]) -> list[dict]:
+    cells: dict[tuple, dict] = {}
+    seen: set[tuple] = set()
+    for row in rows:
+        if "condition" not in row:
+            continue
+        # An attempt counts once: a later run of an attempt already counted (for example after
+        # resuming a block on one PC only) is listed as not counted.
+        once = (row.get("series", "P1"), row.get("arm"), row["condition"], row["load"], row.get("attempt"))
+        if row["outcome"] in ("passed", "failed"):
+            if once in seen:
+                row["attempt_outcome"] = row["outcome"]
+                row["outcome"] = "not_counted"
+                row["not_counted_reasons"] = ["this attempt was already counted in an earlier run"]
+            else:
+                seen.add(once)
+        key = (row.get("series", "P1"), row.get("arm"), row["condition"], row["load"])
+        cell = cells.setdefault(key, {"series": key[0], "arm": key[1], "condition": key[2], "load": key[3],
+                                      "attempts": 0,
+                                      "counted": 0, "successes": 0, "failures": 0, "deadline_reached": 0,
+                                      "successes_without_buffer0": 0,
+                                      "not_counted": [], "times": [], "binaries": set(), "snrs": []})
+        cell["attempts"] += 1
+        if row.get("modem_binary_sha256"):
+            cell["binaries"].add(row["modem_binary_sha256"])
+        if row["outcome"] in ("passed", "failed"):
+            cell["counted"] += 1
+            if row.get("effective_snr_db") is not None:
+                cell["snrs"].append(row["effective_snr_db"])
+            if row["outcome"] == "passed":
+                cell["successes"] += 1
+                cell["successes_without_buffer0"] += int(bool(row.get("buffer0_missing")))
+                if row.get("delivery_time_s") is not None:
+                    cell["times"].append(row["delivery_time_s"])
+            else:
+                cell["failures"] += 1
+                cell["deadline_reached"] += int(bool(row.get("deadline_reached")))
+        else:
+            cell["not_counted"].append({"attempt": row.get("attempt"), "outcome": row["outcome"],
+                                        "reasons": row.get("not_counted_reasons") or row.get("warnings")})
+    out = []
+    for cell in cells.values():
+        low, high = wilson(cell["successes"], cell["counted"])
+        times = cell.pop("times")
+        cell["modem_binaries"] = sorted(cell.pop("binaries"))
+        snrs = cell.pop("snrs")
+        cell["median_effective_snr_db"] = None if not snrs else round(median(snrs), 2)
+        if len(cell["modem_binaries"]) > 1:
+            cell["warning"] = "the modem binary changed during the cell (version updated?)"
+        cell.update(success_rate=round(cell["successes"] / cell["counted"], 4) if cell["counted"] else None,
+                    wilson_95=[low, high], median_delivery_s=None if not times else round(median(times), 1))
+        out.append(cell)
+    return sorted(out, key=lambda c: (c["series"], str(c["arm"]), c["condition"], c["load"]))
+
+
 def pair_runs(runs: list[dict]) -> tuple[list[tuple[dict, dict]], list[dict], list[dict]]:
     """Pair senders with receivers by tag and start time.
 
@@ -257,9 +431,11 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
         other = safe_extract(other, out_dir / "other_pc" / other.stem)
     runs = find_runs(local, "this PC") + find_runs(other, "other PC")
     pairs, unpaired, crossed = pair_runs(runs)
+    sim_attempts = find_simulator_attempts(local, "this PC") + find_simulator_attempts(other, "other PC")
     rows = []
     for s, r in pairs:
         result = cross_check(s["result"], r["result"])
+        attach_simulator(result, s, r, sim_attempts)
         result["sender_dir"], result["receiver_dir"] = s["dir"], r["dir"]
         result["sender_pc"], result["receiver_pc"] = s["origin"], r["origin"]
         result["sender_start_utc"] = s["start"].isoformat()
@@ -267,6 +443,7 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
         r["path"].with_name("cross_check.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         rows.append(result)
+    cells = cell_table(rows)      # may mark repeated attempts as not counted
     counts: dict[str, int] = {}
     for row in rows:
         counts[row["outcome"]] = counts.get(row["outcome"], 0) + 1
@@ -286,11 +463,32 @@ def pair_session(local: Path, other: Path, out_dir: Path) -> dict:
                                   or (item["started_utc"] or "") > (latest[item["direction"]]["started_utc"] or "")):
             latest[item["direction"]] = item
     report["calibration"] = {"latest": latest, "all": calibrations}
-    report["outcome"] = ("passed" if rows and set(counts) == {"passed"} and not crossed
-                         else "review")
+    report["cells"] = cells
+    if report["cells"]:
+        # A Phase 1 session: failures are results; the session needs review only for
+        # attempts that could not be counted, crossed runs or runs without a partner.
+        clean = (not crossed and not unpaired and not any(c["not_counted"] for c in report["cells"])
+                 and not any(c.get("warning") for c in report["cells"]))
+        report["outcome"] = "passed" if clean else "review"
+    else:
+        report["outcome"] = ("passed" if rows and set(counts) == {"passed"} and not crossed
+                             else "review")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "cross_check_report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    if report["cells"]:
+        with open(out_dir / "phase1_cells.csv", "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle, delimiter=";")
+            writer.writerow(["series", "arm", "condition", "load", "attempts", "counted", "successes", "failures",
+                             "deadline_reached", "success_rate", "wilson_low", "wilson_high",
+                             "median_delivery_s", "median_effective_snr_db", "not_counted",
+                             "successes_without_buffer0"])
+            for c in report["cells"]:
+                writer.writerow([c["series"], c["arm"], c["condition"], c["load"], c["attempts"], c["counted"],
+                                 c["successes"], c["failures"], c["deadline_reached"], c["success_rate"],
+                                 c["wilson_95"][0], c["wilson_95"][1], c["median_delivery_s"],
+                                 c["median_effective_snr_db"],
+                                 len(c["not_counted"]), c["successes_without_buffer0"]])
     with open(out_dir / "cross_check_report.csv", "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, delimiter=";")
         writer.writerow(["sender_start_utc", "tag", "outcome", "modem", "arm", "sender_run",

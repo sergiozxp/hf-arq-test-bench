@@ -38,7 +38,9 @@ the MONITOR switch to OFF.
    Recording) to `UCA222-A` on PC A and `UCA222-B` on PC B.
 2. Make another device the Windows default for playback and recording.
 3. Disable "Listen to this device", audio enhancements, spatial audio and
-   sleep. Close every other audio program.
+   sleep. In each interface's Properties > Advanced (Playback and Recording), untick
+   "Allow applications to take exclusive control of this device". Close every other
+   audio program.
 4. Set the same recording and playback format on both PCs (device Properties,
    Advanced), 48 kHz, and record it. Mercury opens the devices at 48 kHz.
 5. Disconnect the network during the test. Both modems listen on all network

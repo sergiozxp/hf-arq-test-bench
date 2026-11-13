@@ -1,0 +1,189 @@
+{
+  "mode": "send",
+  "tag": "PILOT-poor-200B-10",
+  "run_id": "PILOT-poor-200B-10_20261112T221055Z_c16844",
+  "protocol_version": "5.3",
+  "smoke_profile": "MS-1.0",
+  "app_version": "0.2.0-alpha.5",
+  "modem": "mercury",
+  "arm": "Mercury 1.9.19",
+  "mycall": "XQ2CG-A",
+  "peer_call": "XQ2CG-B",
+  "bw_command": "BW500",
+  "bw_when": "before",
+  "payload_bytes_requested": 200,
+  "ack_mode": true,
+  "condition": "poor",
+  "deadline_s": 600.0,
+  "modem_binary_sha256": "6b0e83185d5052d01e0d3041c9c6588023f9a0abe0196c62563dc33ce4467673",
+  "destination": "XQ2CG-B",
+  "payload_bytes": 200,
+  "payload_sha256": "3f445738b011e40688b4b3c89cba2c189e7e7578b2aed65bb7d526703d71d729",
+  "header_hex": "00000000000000c83f445738b011e406",
+  "arq_confirmed": false,
+  "delivered_intact": null,
+  "bw_accepted": true,
+  "connected": {
+    "line": "CONNECTED XQ2CG-A XQ2CG-B 500",
+    "fields": [
+      "CONNECTED",
+      "XQ2CG-A",
+      "XQ2CG-B",
+      "500"
+    ],
+    "expected_bandwidth": "500",
+    "valid_form": true,
+    "bandwidth_matches": true,
+    "callsigns_match": true,
+    "expected_callsigns": [
+      "XQ2CG-A",
+      "XQ2CG-B"
+    ]
+  },
+  "write_s": 0.0006701,
+  "buffer_lines": [
+    [
+      0.9795905,
+      "BUFFER 216"
+    ]
+  ],
+  "positive_buffer_before_zero": true,
+  "ack_verified": true,
+  "ack_line": "ACK run=c4e7812823a2 SHA256=3f445738b011e406",
+  "ack_expected": {
+    "run": "c4e7812823a2",
+    "sha256_16": "3f445738b011e406"
+  },
+  "ack_round_trip_s": 98.4889906,
+  "delivery_time_s": 106.8498961,
+  "connection_s": 8.3606042,
+  "final_state": "disconnected",
+  "cleanup_disconnect": null,
+  "link_stats": {
+    "sn_db": [
+      -5.3,
+      -5.9,
+      0.1,
+      -4.8,
+      -4.4,
+      -1.1,
+      -1.8
+    ],
+    "sn_min_db": -5.9,
+    "sn_max_db": 0.1,
+    "bitrate_lines": [
+      "BITRATE (15) 68 BPS",
+      "BITRATE (4) 87 BPS",
+      "BITRATE (100) 63 BPS"
+    ],
+    "bitrate_levels": [
+      {
+        "level": 15,
+        "bps": 68,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 100,
+        "bps": 63,
+        "direction": null
+      }
+    ],
+    "first_level": 15,
+    "link_state": null,
+    "busy_on_count": 0,
+    "ptt_on_count": 7,
+    "infrastructure_events": []
+  },
+  "responses": {
+    "mycall": {
+      "command": "MYCALL XQ2CG-A",
+      "response": "OK",
+      "lines": [
+        "OK",
+        "REGISTERED XQ2CG-A"
+      ]
+    },
+    "bw": {
+      "command": "BW500",
+      "response": "OK",
+      "lines": [
+        "OK"
+      ]
+    },
+    "connect": {
+      "command": "CONNECT XQ2CG-A XQ2CG-B",
+      "response": "OK",
+      "lines": [
+        "OK"
+      ]
+    },
+    "disconnect": {
+      "command": "DISCONNECT",
+      "response": "OK",
+      "lines": [
+        "OK",
+        "DISCONNECTED"
+      ]
+    }
+  },
+  "command_response_error": false,
+  "protocol_warnings": [],
+  "failures": [
+    "BUFFER 0 was not observed after writing (timeout or socket closed)"
+  ],
+  "sender_completed": false,
+  "sockets": {
+    "8300": {
+      "closed": false,
+      "socket_error": null,
+      "received_bytes": 475
+    },
+    "8301": {
+      "closed": false,
+      "socket_error": null,
+      "received_bytes": 45
+    }
+  },
+  "incomplete_evidence": [],
+  "warnings": []
+}

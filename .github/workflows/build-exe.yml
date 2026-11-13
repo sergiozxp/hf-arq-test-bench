@@ -45,6 +45,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install the simulator's packages
+        run: python -m pip install numpy==2.2.6 sounddevice==0.5.1
       - name: Run simulated smoke tests
         shell: pwsh
         run: |
@@ -57,6 +59,11 @@ jobs:
           python tests/test_simulated_gui.py
           python tests/test_receiver_rules.py
           python tests/test_calibration.py
+          python tests/test_channel_model.py
+          python tests/test_channel_sim.py
+          python tests/test_blocks.py
+          python tests/test_no_buffer0.py
+          python smoke/channel_sim.py list
           python tests/test_launcher.py --launcher "python smoke/smoke_gui.py"
       - name: Download the official Mercury 1.9.19 Windows ZIP
         shell: pwsh
@@ -80,10 +87,11 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install the packager
-        run: python -m pip install --upgrade pip pyinstaller
+        run: python -m pip install --upgrade pip pyinstaller numpy==2.2.6 sounddevice==0.5.1
       - name: Build the smoke executable
         run: >-
           pyinstaller --noconfirm --clean --onefile --noconsole
+          --hidden-import sounddevice --collect-all _sounddevice_data
           --name HF-ARQ-Modem-Smoke --paths smoke smoke/smoke_gui.py
       - name: Write release checksums
         shell: pwsh
@@ -96,6 +104,7 @@ jobs:
           path: |
             dist/HF-ARQ-Modem-Smoke.exe
             dist/SHA256SUMS.txt
+          # Releases keep their own copy; test builds expire sooner so the artifact quota is not hit.
           retention-days: 7
 
   release:

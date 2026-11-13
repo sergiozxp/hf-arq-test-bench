@@ -14,7 +14,7 @@ message-workflow behaviour.
 
 ## Status
 
-This is v0.2.0-alpha.4. The smoke GUI runs profile MS-1.0 (E0-1, E0-2, E0-3, H1) against
+This is v0.2.0-alpha.5. The smoke GUI runs profile MS-1.0 (E0-1, E0-2, E0-3, H1) against
 Mercury 1.9.19, which it starts from the verified official ZIP, and against VARA
 HF 4.9.0, which the operator opens. It shows Mercury's live levels, checks which
 program owns ports 8300 and 8301 before every test, and cross-checks a whole
@@ -26,11 +26,37 @@ alpha.3: Mercury 1.9.19 8/8 pairs passed, VARA HF 4.9.0 unlicensed 8/8, VARA HF
 installation, wiring and control of each arm; they are not performance results.
 With alpha.4 (protocol v5.2) the complete profile, including the same-session ACK
 (E0-3), passed 9/9 for each arm on 2026-10-23, and the bench calibration measured
-SNR 74/77 dB and SINAD 71/74 dB on the two audio paths. The channel simulator and
-performance results are not implemented yet.
+SNR 74/77 dB and SINAD 71/74 dB on the two audio paths. Alpha.5 adds the Phase 1
+channel simulator (protocol v5.3). On 2026-11-12 it was validated on the real bench
+(CAL through the simulator, the 9-test sequence in Transparent mode with each arm's
+power reference saved), and the minimum replication kit (Moderate, 200 B, 10 attempts)
+was run for the three arms, followed on 2026-11-13 by the pilot (Good and Poor). The
+profiles are frozen; the campaign is still to be run and no campaign result exists yet.
 
 The historical v0.1.0 release remains unchanged. It used the earlier Mercury
 plus Pat scope and is superseded for new work.
+
+### Changes in 0.2.0-alpha.5
+
+- Phase 1 channel simulator on PC B with a third UCA222 (Tools > Channel simulator):
+  two-path Watterson profiles based on ITU-R F.1487 delays and spreads, noise in 3 kHz, published
+  seeds per attempt, dropout, clipping and peak checks.
+- SNR referred to each arm's RMS power (primary), measured once per arm in its
+  Transparent sequence; a -3 dBFS peak ceiling for safety; the PEP-limited profile
+  (noise referred to the calibration tone's peak) is kept as secondary. Each attempt
+  records its effective SNR.
+- Phase 1 cells (and the minimum replication kit): attempts with ACK and deadline,
+  matched with the simulator's attempts; the cell report gives success rate with a
+  95 % Wilson interval, the median delivery time and the median effective SNR.
+- Blocks: one RUN per PC runs a whole stage for the modem in use (pilot: 20 attempts;
+  campaign: 180 attempts; repeat: the missing and not-counted attempts from the last
+  cross-check). The simulator, in Automatic mode, takes each attempt's condition,
+  number and arm from PC B. A block resumes by itself, stops after three attempts in
+  a row that point to the bench, refuses to start if the modem binary or VARA's Drive
+  changed, and ends with a named results ZIP.
+- Any modem version may be used, but the same binary on both PCs and throughout the
+  campaign (the cross-check rejects pairs from different binaries).
+- Protocol v5.3; docs/phase1_channel_design.md and docs/phase1_guide.md.
 
 ### Changes in 0.2.0-alpha.4
 
@@ -71,6 +97,7 @@ plus Pat scope and is superseded for new work.
 - docs/modem_smoke_profile_ms1.md
 - docs/windows_modem_smoke_guide.md
 - docs/protocol_compatibility.md
+- docs/phase1_channel_design.md, docs/phase1_guide.md
 - smoke/: preflight scripts for Mercury 1.9.19 and VARA HF 4.9.0, and the Windows GUI
 
 ## Scope of the first benchmark table

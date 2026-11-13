@@ -1,0 +1,205 @@
+{
+  "mode": "listen",
+  "tag": "PILOT-poor-200B-10",
+  "run_id": "PILOT-poor-200B-10_20261112T220953Z_714d90",
+  "protocol_version": "5.3",
+  "smoke_profile": "MS-1.0",
+  "app_version": "0.2.0-alpha.5",
+  "modem": "mercury",
+  "arm": "Mercury 1.9.19",
+  "mycall": "XQ2CG-B",
+  "peer_call": "XQ2CG-A",
+  "bw_command": "BW500",
+  "bw_when": "before",
+  "payload_bytes_requested": 200,
+  "ack_mode": true,
+  "condition": "poor",
+  "deadline_s": 600.0,
+  "modem_binary_sha256": "6b0e83185d5052d01e0d3041c9c6588023f9a0abe0196c62563dc33ce4467673",
+  "delivered_intact": true,
+  "arq_confirmed": null,
+  "bw_accepted": true,
+  "connected": {
+    "line": "CONNECTED XQ2CG-A XQ2CG-B 500",
+    "fields": [
+      "CONNECTED",
+      "XQ2CG-A",
+      "XQ2CG-B",
+      "500"
+    ],
+    "expected_bandwidth": "500",
+    "valid_form": true,
+    "bandwidth_matches": true,
+    "callsigns_match": true,
+    "expected_callsigns": [
+      "XQ2CG-A",
+      "XQ2CG-B"
+    ]
+  },
+  "declared_length": 200,
+  "t_transferencia_s": 63.1900674,
+  "payload_sha256": "3f445738b011e40688b4b3c89cba2c189e7e7578b2aed65bb7d526703d71d729",
+  "truncated_hash_matches": true,
+  "matches_expected_payload": true,
+  "ack_sent": true,
+  "ack_line": "ACK run=c4e7812823a2 SHA256=3f445738b011e406",
+  "ack_arq_confirmed": true,
+  "ack_arq_s": 36.4907495,
+  "final_state": "disconnected",
+  "cleanup_disconnect": null,
+  "data_port_total_bytes": 216,
+  "data_port_expected_bytes": 216,
+  "data_port_bytes_outside_session": 0,
+  "data_port_chunks": [
+    {
+      "t_mono_ns": 3208665513365800,
+      "bytes": 24
+    },
+    {
+      "t_mono_ns": 3208677149324400,
+      "bytes": 48
+    },
+    {
+      "t_mono_ns": 3208688779538100,
+      "bytes": 48
+    },
+    {
+      "t_mono_ns": 3208705975624300,
+      "bytes": 48
+    },
+    {
+      "t_mono_ns": 3208728703201100,
+      "bytes": 48
+    }
+  ],
+  "link_stats": {
+    "sn_db": [
+      -0.7,
+      -3.2,
+      -5.7,
+      -6.1,
+      -4.8,
+      -2.6,
+      -4.9,
+      -6.5,
+      -2.7,
+      -2.9,
+      -1.8,
+      -3.2,
+      -1.7
+    ],
+    "sn_min_db": -6.5,
+    "sn_max_db": -0.7,
+    "bitrate_lines": [
+      "BITRATE (15) 68 BPS",
+      "BITRATE (4) 87 BPS",
+      "BITRATE (100) 63 BPS"
+    ],
+    "bitrate_levels": [
+      {
+        "level": 15,
+        "bps": 68,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      },
+      {
+        "level": 100,
+        "bps": 63,
+        "direction": null
+      },
+      {
+        "level": 4,
+        "bps": 87,
+        "direction": null
+      }
+    ],
+    "first_level": 15,
+    "link_state": null,
+    "busy_on_count": 0,
+    "ptt_on_count": 9,
+    "infrastructure_events": []
+  },
+  "responses": {
+    "mycall": {
+      "command": "MYCALL XQ2CG-B",
+      "response": "OK",
+      "lines": [
+        "REGISTERED XQ2CG-B",
+        "OK",
+        "REGISTERED XQ2CG-B"
+      ]
+    },
+    "bw": {
+      "command": "BW500",
+      "response": "OK",
+      "lines": [
+        "OK"
+      ]
+    },
+    "listen": {
+      "command": "LISTEN ON",
+      "response": "OK",
+      "lines": [
+        "OK"
+      ]
+    },
+    "listen_off": {
+      "command": "LISTEN OFF",
+      "response": "OK",
+      "lines": [
+        "OK"
+      ]
+    }
+  },
+  "command_response_error": false,
+  "protocol_warnings": [],
+  "failures": [],
+  "sockets": {
+    "8300": {
+      "closed": false,
+      "socket_error": null,
+      "received_bytes": 588
+    },
+    "8301": {
+      "closed": false,
+      "socket_error": null,
+      "received_bytes": 216
+    }
+  },
+  "incomplete_evidence": [],
+  "warnings": []
+}

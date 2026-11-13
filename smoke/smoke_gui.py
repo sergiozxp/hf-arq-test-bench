@@ -33,6 +33,8 @@ import mercury_status
 import smoke_cross_check  # noqa: F401  # included by PyInstaller
 import smoke_sequence  # noqa: F401  # included by PyInstaller
 import bench_calibration  # noqa: F401  # included by PyInstaller
+import channel_sim  # noqa: F401  # included by PyInstaller (numpy; sounddevice is imported when run)
+import sim_window
 import vara_runtime as vara
 from smoke_common import listeners_with_pid, netstat_text, process_name
 
@@ -298,8 +300,11 @@ class ModemSmokeWindow(tk.Tk):
         ttk.Button(tools, text="Cross-check two result files…", command=self._cross_check).grid(
             row=0, column=3, padx=4, pady=6
         )
+        ttk.Button(tools, text="Channel simulator (PC B)…", command=self._open_simulator).grid(
+            row=0, column=4, padx=4, pady=6
+        )
         ttk.Label(tools, text=f"Working directory: {HERE}", foreground="#555").grid(
-            row=1, column=0, columnspan=4, sticky="w", padx=8
+            row=1, column=0, columnspan=5, sticky="w", padx=8
         )
 
         output = ttk.LabelFrame(self, text="4. Result")
@@ -365,14 +370,30 @@ class ModemSmokeWindow(tk.Tk):
             return
         name = self.test_name.get()
         sequence = logic.is_sequence(name)
-        enabled = sequence or logic.is_h1(name)
-        limit = len(logic.SEQUENCE) if sequence else 3
-        if self.repeat_mode != sequence:
-            # The spin box is the H1 repetition, or the first step of the sequence.
-            self.repeat_mode = sequence
+        campaign = logic.is_campaign(name)
+        block = logic.is_block(name)
+        enabled = sequence or campaign or logic.is_h1(name)
+        if block:
+            limit, kind = 1, ("block", 0)
+            label, hint = ("Start at:", "Automatic: each PC skips the attempts it has already completed "
+                                        "for this modem, so RUN resumes a stopped block.")
+        elif campaign:
+            limit = logic.CAMPAIGN_TESTS[name]["attempts"]
+            kind = ("campaign", limit)
+            label, hint = (f"Start at attempt (1–{limit}):",
+                           "Normally 1. Use the same attempt on PC A, PC B and the simulator's first attempt.")
+        elif sequence:
+            limit, kind = len(logic.SEQUENCE), ("sequence", 0)
+            label, hint = logic.SEQUENCE_LABEL, logic.SEQUENCE_HINT
+        else:
+            limit, kind = 3, ("h1", 0)
+            label, hint = logic.REPETITION_LABEL, logic.REPETITION_HINT
+        if self.repeat_mode != kind:
+            # The spin box is the H1 repetition, the first step of the sequence or the first attempt.
+            self.repeat_mode = kind
             self.repeat_box.configure(to=limit)
-            self.repeat_label.configure(text=logic.SEQUENCE_LABEL if sequence else logic.REPETITION_LABEL)
-            self.repeat_hint.configure(text=logic.SEQUENCE_HINT if sequence else logic.REPETITION_HINT)
+            self.repeat_label.configure(text=label)
+            self.repeat_hint.configure(text=hint)
             self.repeat.set(1)
         self.repeat_box.configure(state="readonly" if enabled else "disabled")
         try:
@@ -390,6 +411,16 @@ class ModemSmokeWindow(tk.Tk):
                                          "then records (path B->A)." if self.values["role"].get() == "A"
                                          else "Start PC B first: it records (path A->B), then plays.")))
             return
+        if block:
+            order = (" Start PC B first (simulator in Automatic mode), then this PC when PC B shows "
+                     "'waiting_for_connection'. Both PCs must show the same first attempt."
+                     if self.values["role"].get() == "A"
+                     else " Start the simulator in Automatic mode, then this PC, then PC A. At the end a "
+                          "results ZIP is created by itself.")
+        elif campaign:
+            order = (" Start PC B and the simulator first. PC A waits "
+                     f"{logic.CAMPAIGN_GAP_S} s between attempts." if self.values["role"].get() == "A"
+                     else " Start the simulator (Automatic, or the same condition and first attempt), then this PC, then PC A.")
         if sequence:
             order = (" Start PC B first. PC A waits "
                      f"{logic.SEQUENCE_GAP_S} s between tests ({logic.SEQUENCE_GAP_S + 60} s after E0-3)." if self.values["role"].get() == "A"
@@ -919,8 +950,15 @@ class ModemSmokeWindow(tk.Tk):
                                                 encoding="utf-8")
         test_name = self.test_name.get()
         sequence = logic.is_sequence(test_name)
-        repetition = self.repeat.get() if (sequence or logic.is_h1(test_name)) else 1
-        if sequence:
+        campaign = logic.is_campaign(test_name)
+        repetition = self.repeat.get() if (sequence or campaign or logic.is_h1(test_name)) else 1
+        if logic.is_block(test_name):
+            commands = logic.block_commands(values["role"], test_name)
+            tag = logic.test_tag(test_name, 1)
+        elif campaign:
+            commands = logic.campaign_commands(values["role"], test_name, repetition)
+            tag = logic.test_tag(test_name, repetition)
+        elif sequence:
             commands = logic.sequence_commands(values["role"], repetition)
             tag = "Full sequence from step " + str(repetition)
         else:
@@ -1114,6 +1152,18 @@ class ModemSmokeWindow(tk.Tk):
             self.event_queue.put(("summary", cross_check.read_text(encoding="utf-8")))
         self.event_queue.put(("done", ""))
 
+    def _open_simulator(self) -> None:
+        window = getattr(self, "simulator_window", None)
+        if window is not None and window.winfo_exists():
+            window.lift()
+            return
+        if self.values["role"].get() != "B" and not messagebox.askyesno(
+                "Channel simulator", "The simulator runs on PC B, next to the receiving modem, with its own "
+                "interface (UCA-S). Open it on this PC anyway?"):
+            return
+        RESULTS.mkdir(exist_ok=True)
+        self.simulator_window = sim_window.SimulatorWindow(self, process_command, HERE, RESULTS)
+
     def _close(self) -> None:
         if self._test_running():
             if not messagebox.askyesno("Test in progress", "Close and stop it?"):
@@ -1131,6 +1181,11 @@ class ModemSmokeWindow(tk.Tk):
                 self._record_session_end("stopped_on_close", code)
             else:
                 self._record_session_end("left_running_on_close", None)
+        window = getattr(self, "simulator_window", None)
+        if window is not None and window.winfo_exists() and window.running():
+            if not messagebox.askyesno("Simulator running", "Stop the channel simulator and close?"):
+                return
+            window._stop()
         if self.status_monitor:
             self.status_monitor.stop()
         self.destroy()

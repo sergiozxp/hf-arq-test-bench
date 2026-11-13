@@ -54,6 +54,30 @@ VARA HF 4.9.0 licensed, full sequence with app 0.2.0-alpha.4 (protocol 5.2) on
 2026-10-23 04:39–04:52 UTC: 9 of 9 pairs passed, E0-3 included, `LINK REGISTERED`,
 registration code redacted in every archived VARA.ini.
 
+Phase 1 bench, first run through the channel simulator in Transparent mode (app
+0.2.0-alpha.5, 2026-11-11/12, UCA-S on PC B): CAL A->B SNR 52.8 dB, SINAD 52.9 dB;
+B->A SNR 63.4 dB, SINAD 60.1 dB; tone -19.3 dBFS peak (12 dB simulator attenuation);
+references -6.54 / -6.64 dBFS peak at the simulator input. Mercury full sequence 9/9
+through the simulator, zero dropouts in 25 min, Mercury peaks within +0.05 dB of the
+references, PortAudio latency 43 ms in / 213 ms out.
+
+Pilot (app 0.2.0-alpha.5 blocks, simulator Automatic, equal RMS SNR, 200 B, 10 attempts,
+2026-11-12/13, every simulator attempt valid): Good: VARA licensed 10/10, 36.4 s; Mercury
+10/10, 41.5 s; VARA unlicensed 10/10, 62.0 s. Poor: VARA licensed 10/10, 69.2 s; VARA
+unlicensed 10/10, 70.9 s; Mercury 10/10, 130.9 s (one success without BUFFER 0 from
+Mercury). VERIFY (Mercury, Poor, same traces) 10/10, 128.1 s. VARA rejects alphabetic
+SSIDs (MYCALL XQ2CG-A answered WRONG): those runs are procedure faults, excluded.
+
+Minimum replication kit (app 0.2.0-alpha.5, 2026-11-12, simulator Moderate, equal RMS
+SNR, 200 B, 10 attempts, every simulator attempt valid): Mercury 1.9.19 10/10, median
+delivery 56.3 s; VARA HF 4.9.1 unlicensed (Drive -3 dB) 10/10, 66.1 s; VARA HF 4.9.1
+licensed (Drive -7 dB) 10/10, 46.9 s. Median effective SNR A->B 2.88–3.05 dB.
+Before the valid VARA unlicensed series, three runs (18:31–18:47 UTC, 15:31–15:47 local)
+were stopped: PC A called for 10 min and PC B's VARA registered no signal at all. The
+operator then unticked "Allow applications to take exclusive control of this device"
+on PC B's two interfaces (UCA-B and UCA-S); the cell then ran 10/10 from attempt 1. The
+stopped runs are kept and are not counted.
+
 Bench calibration with the bench's own signal (app 0.2.0-alpha.4, 2026-10-23 03:54 UTC,
 clean cable, Windows levels 100/54, left channel): A->B SNR 74.1 dB, SINAD 71.2 dB;
 B->A SNR 77.5 dB, SINAD 73.8 dB; tone received at -6.7 dBFS peak for -6.0 dBFS sent

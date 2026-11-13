@@ -26,6 +26,9 @@ DEFAULT_EXE = Path(r"C:\VARA\VARA.exe")
 # Official installer from downloads.winlink.org, recorded on 2026-10-22.
 INSTALLER_ZIP_SHA256 = "5ad7d75c722e4414705dec998c28a711b7567f8568bea75cb84e8aa7c991f48a"
 INSTALLER_EXE_SHA256 = "b7d67fd9fcc2043a49e58ae8202fc699bdb6520255d21aefd258260c767e04bd"
+# VARA.exe of 4.9.0, used for the smoke tests of 2026-10-22/23. Any version may be used,
+# as long as both PCs run the same binary (checked pair by pair and cell by cell).
+VARA_490_EXE_SHA256 = "c69b8c81f888032a67f3c15fe57ef5ccdabef6eba5be148a5a4d7eb44f00486f"
 PROCESS_NAME = "vara.exe"
 
 
@@ -89,6 +92,9 @@ def inspect(exe: str | Path) -> dict:
 def setting_notes(info: dict, mycall: str = "") -> tuple[list[str], list[str]]:
     """Return (errors, warnings) about the VARA settings for the bench."""
     errors, warnings = [], []
+    if info.get("exe_sha256"):
+        warnings.append("VARA.exe SHA-256 " + info["exe_sha256"][:12] + "…: the other PC must show the "
+                        "same value (same VARA version on both PCs, update check off).")
     s = info["settings"]
     if s["tcp_command_port"] not in (None, 8300):
         errors.append(f"VARA uses TCP command port {s['tcp_command_port']}; the bench uses 8300.")

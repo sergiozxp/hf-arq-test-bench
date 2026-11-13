@@ -50,6 +50,9 @@ check(cc.cross_check(sender("H1-1", modem="vara", arm="VARA HF licensed"),
       "a licensed sender against an unlicensed receiver is rejected")
 check(cc.cross_check(sender("H1-1"), receiver("H1-1", mycall="XQ2CG-9"))["outcome"] == "invalid_pair",
       "a receiver with another callsign is rejected")
+check(cc.cross_check(sender("H1-1", modem_binary_sha256="c69b8c81" * 8),
+                     receiver("H1-1", modem_binary_sha256="42b217d9" * 8))["outcome"] == "invalid_pair",
+      "VARA 4.9.0 on one PC and 4.9.1 on the other is rejected (different binaries)")
 check(cc.cross_check(sender("H1-1", size=200), receiver("H1-1", size=1024))["outcome"] == "invalid_pair",
       "different payload sizes are rejected")
 check(cc.cross_check(receiver("H1-1"), sender("H1-1"))["outcome"] == "invalid_pair",
@@ -164,4 +167,57 @@ try:
 except ValueError:
     check(not (root / "outside.txt").exists(), "a ZIP with ../ paths is refused")
 shutil.rmtree(root)
+
+# ---------------------------------------------------------------- Phase 1: simulator and cells
+low, high = cc.wilson(8, 10)
+check(abs(low - 0.4902) < 1e-3 and abs(high - 0.9433) < 1e-3, "Wilson interval for 8/10 is 49.0-94.3 %")
+check(cc.wilson(0, 0) == (None, None) and cc.median([3, 1, 2]) == 2, "empty cell and median")
+from datetime import datetime, timedelta, timezone
+t0 = datetime(2026, 10, 24, 1, 0, tzinfo=timezone.utc)
+
+
+def p1_run(k, outcome_ok=True, deadline=False):
+    tag = f"P1-moderate-200B-{k:02d}"
+    em = sender(tag, ack_mode=True, ack_verified=outcome_ok, ack_line="ACK", condition="moderate",
+                delivery_time_s=40.0 + k, deadline_reached=deadline, sender_completed=outcome_ok)
+    rx = receiver(tag, ack_mode=True, ack_sent=outcome_ok, ack_line="ACK", condition="moderate",
+                  delivered_intact=outcome_ok)
+    return {"tag": tag, "start": t0 + timedelta(minutes=3 * k), "result": em}, em, rx
+
+
+sims = [{"attempt": k, "mode": "moderate", "start": t0 + timedelta(minutes=3 * k, seconds=8), "valid": k != 2,
+         "problems": [] if k != 2 else ["audio dropouts {'input_overflow': 1}"], "pc": "this PC", "log": "x"}
+        for k in (1, 2, 3, 4)]
+sims[3]["mode"] = "poor"
+for sim_row in sims:
+    sim_row.update(arm="Mercury 1.9.19", snr_reference="rms", effective_snr_db={"A->B": 3.1, "B->A": 2.9})
+rows = []
+for k, ok in ((1, True), (2, True), (3, False), (4, True)):
+    s_run, em, rx = p1_run(k, ok, deadline=not ok)
+    row = cc.cross_check(em, rx)
+    cc.attach_simulator(row, s_run, {"start": s_run["start"] - timedelta(seconds=30)}, sims)
+    rows.append(row)
+check([r["outcome"] for r in rows] == ["passed", "not_counted", "failed", "not_counted"],
+      "a dropout or another condition in the simulator makes the attempt not counted")
+check("trace" not in rows[0] and rows[0]["simulator"]["attempt"] == 1, "the simulator attempt is attached")
+lonely_run, em, rx = p1_run(9)
+lonely = cc.cross_check(em, rx)
+cc.attach_simulator(lonely, lonely_run, {"start": lonely_run["start"] + timedelta(hours=3)}, sims)
+check(lonely["outcome"] == "not_counted" and "no simulator attempt" in lonely["not_counted_reasons"][0],
+      "a run without a simulator attempt is not counted")
+cells = cc.cell_table(rows)
+c = cells[0]
+check(len(cells) == 1 and (c["attempts"], c["counted"], c["successes"], c["failures"], c["deadline_reached"])
+      == (4, 2, 1, 1, 1) and c["median_delivery_s"] == 41.0 and len(c["not_counted"]) == 2,
+      "the cell counts 1 success and 1 failure out of 2 counted, median 41 s")
+mixed = [dict(rows[0], modem_binary_sha256="a" * 64), dict(rows[2], modem_binary_sha256="b" * 64)]
+check(cc.cell_table(mixed)[0].get("warning", "").startswith("the modem binary changed"),
+      "a cell whose modem version changed is flagged")
+check(cells[0]["median_effective_snr_db"] == 3.1, "the cell reports the median effective RMS SNR")
+other_arm = [dict(x, arm="VARA HF licensed") for x in sims]
+s_run, em, rx = p1_run(1)
+row = cc.cross_check(em, rx)
+cc.attach_simulator(row, s_run, {"start": s_run["start"] - timedelta(seconds=30)}, other_arm)
+check(row["outcome"] == "not_counted" and "noise was set for VARA HF licensed" in row["not_counted_reasons"][0],
+      "noise set for another arm makes the attempt not counted")
 print("ALL CROSS-CHECK TESTS PASSED")

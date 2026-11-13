@@ -1,10 +1,16 @@
-# HF-ARQ Modem Benchmark Protocol v5.2
+# HF-ARQ Modem Benchmark Protocol v5.3
 
 ## Objective and scope
 
 This protocol compares HF ARQ modems and their native transport interfaces, not
 user applications. The benchmark arms are Mercury 1.9.19, VARA HF unlicensed,
 and VARA HF licensed. Pat and VarAC are out of scope.
+
+**Modem versions.** Any version may be benchmarked, but both PCs must run the same
+binary, and it must not change during a campaign: automatic updates are disabled,
+every result records the binary's SHA-256 and the version the modem reports, the
+cross-check rejects a pair whose PCs ran different binaries, and a cell whose binary
+changed is flagged. Results apply to the recorded version only.
 
 Each arm uses the same Python reference client at both endpoints:
 
@@ -14,8 +20,10 @@ The client calls each modem through an adapter. The adapter maps a common
 semantic operation to native commands and must document its mapping in
 protocol_compatibility.md.
 
-The full benchmark uses three Windows roles: PC A, a simulator PC, and PC B.
-The two-PC Mercury smoke profile is a preflight check, not a performance test.
+The minimum reproducible bench (v5.3) is two Windows PCs and three audio
+interfaces: PC B runs the receiving modem and the channel simulator, which has its
+own interface. A separate simulator PC is optional. The smoke profile is a preflight
+check, not a performance test. The channel is specified in phase1_channel_design.md.
 
 ## Primary loads
 
@@ -31,11 +39,39 @@ Text is only a secondary sensitivity test and must declare any compression.
 
 ## Phase 1 design
 
-Phase 1 uses BW500 and the two binary loads under MPG (normal), MPP (poor),
-and MPD (disturbed) simulated channels. There are 3 x 3 x 2 = 18 primary
-statistical cells, presented as nine summary rows with the two loads side by
-side. A normal cell has 30 attempts; a predeclared long pilot may use ten and
-is marked exploratory.
+Phase 1 uses BW500, the two binary loads and three two-path Watterson profiles based
+on ITU-R F.1487 (mid-latitude delays and spreads), with band-limited Gaussian noise:
+
+| Profile | Differential delay | Frequency spread (2 sigma) | SNR (3 kHz, RMS) |
+|---|---:|---:|---:|
+| Good | 0.5 ms | 0.1 Hz | +10 dB |
+| Moderate | 1 ms | 0.5 Hz | +3 dB |
+| Poor | 2 ms | 1 Hz | -3 dB |
+
+There are 3 x 3 x 2 = 18 primary cells of 30 attempts, presented as nine rows with
+the two loads side by side. SNR is the modem's RMS signal power over the noise power
+in 3 kHz, so every arm receives the same SNR whatever its peak-to-average ratio. The
+RMS power of each arm and direction is measured once, in the first test (E0-1 16 B,
+the modem's starting mode) of its smoke sequence through the transparent simulator,
+and the noise level then stays fixed for the campaign; it is never adjusted during a
+transfer. Each attempt records its effective RMS SNR. Each
+arm's Drive is set so that its highest peak stays at or below -3 dBFS at the
+simulator input (a safety ceiling against clipping, not a comparison rule). A
+secondary, PEP-limited profile refers SNR to the calibration tone's peak instead. Fading and noise come
+from published seeds per condition, direction and attempt number, the same for
+every arm and bench. A 10-attempt pilot per profile (exploratory) may adjust a
+profile's SNR, before the campaign, only if the profile is saturated in success rate and
+also does not discriminate the delivery times. The pilots of 2026-11-13 were saturated
+(100 %) but separated the delivery times clearly, so the profiles are frozen before P1.
+Each cell reports both the success rate and the time to delivery and ACK.
+
+Each attempt has a deadline from A's CONNECT: 10 min for 200 B, 60 min for 10 KiB.
+An attempt with simulator dropouts, output clipping, a modem peak above -3 dBFS, noise
+set for another arm, or an infrastructure or procedure fault is not counted and is
+repeated with the same trace.
+
+The minimum replication kit is the bench calibration plus 200 B in the moderate
+condition, 10 attempts per arm.
 
 BW2300 is a later separate scenario. Any unavailable combination is recorded
 as not_applicable with its reason.
@@ -58,7 +94,7 @@ The direct bidirectional ACK must be verified for every adapter before Phase 1.
 
 ## Raw attempt record
 
-Every raw record includes protocol_version (5.2), run_id, UTC start, arm,
+Every raw record includes protocol_version (5.3), run_id, UTC start, arm,
 condition, load, trace/seed, modem binary hash, outcome, times, payload hashes,
 ACK fields, and failure reason. Outcome is success, failure, or interrupted.
 An interrupted attempt is retained and its replacement uses the paired trace.
@@ -67,10 +103,11 @@ VARA records start level, NACK count and confirmed bandwidth when available.
 
 ## Reporting
 
-Report total, success, failure, interrupted and excluded counts; success rate
-with Wilson interval; delivery-time median and p90 among successes; bootstrap
-intervals for median and p90; and Kaplan-Meier median only when success exceeds
-50 percent. p90 requires at least five successes.
+Per cell: total, counted, success and failure counts, attempts not counted with
+their reason, the success rate with a 95 % Wilson interval, and the median delivery
+time (A's CONNECT to A's verified ACK) among successes, with the deadline stated.
+The 90th percentile with bootstrap intervals, and a Kaplan-Meier median when many
+attempts reach the deadline, are given in an annex.
 
 ## Session settings common to all arms (added in v5.1)
 
@@ -126,6 +163,17 @@ and about 11 dB for data frames on the same clean cable).
   least 10 dB below the lower of the two values on the path that carries the data.
 - Each record and its recording are archived; the session report shows the latest
   calibration of each path.
+
+## Changes from v5.2
+
+- Minimum reproducible bench: two PCs and three UCA222, simulator on PC B.
+- Phase 1 channel fixed: three Watterson profiles based on F.1487 (delays and spreads),
+  SNR in 3 kHz referred to each arm's RMS power (primary; a peak-referred PEP-limited
+  profile is secondary), -3 dBFS peak ceiling, published seeds.
+- Attempt deadlines, validity rules for the simulator (dropouts, clipping, peak).
+- Reporting simplified to Wilson interval and median; minimum replication kit.
+- Modem versions are not fixed: same binary on both PCs and throughout a campaign,
+  recorded and checked.
 
 ## Changes from v5.1
 

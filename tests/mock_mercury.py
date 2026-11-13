@@ -44,6 +44,8 @@ def start_endpoint(name: str, peer: str, command_port: int, data_port: int) -> N
                     time.sleep(0.3)
                     STATE[peer]["data_socket"].sendall(b"XX")
                 time.sleep(0.2)
+                if MODE == "no_buffer0" and name == "A":
+                    continue          # A's modem never reports BUFFER 0 (Mercury, Poor, 2026-11-12)
                 command_socket.sendall(b"BUFFER 0\r")
 
         threading.Thread(target=relay_data, daemon=True).start()
