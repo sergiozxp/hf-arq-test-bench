@@ -30,8 +30,8 @@ SNR 74/77 dB and SINAD 71/74 dB on the two audio paths. Alpha.5 adds the Phase 1
 channel simulator (protocol v5.3). On 2026-11-12 it was validated on the real bench
 (CAL through the simulator, the 9-test sequence in Transparent mode with each arm's
 power reference saved), and the minimum replication kit (Moderate, 200 B, 10 attempts)
-was run for the three arms. The pilot and the campaign are still to be run; no
-campaign result exists yet.
+was run for the three arms, followed on 2026-11-13 by the pilot (Good and Poor). The
+profiles are frozen; the campaign is still to be run and no campaign result exists yet.
 
 The historical v0.1.0 release remains unchanged. It used the earlier Mercury
 plus Pat scope and is superseded for new work.
@@ -39,7 +39,7 @@ plus Pat scope and is superseded for new work.
 ### Changes in 0.2.0-alpha.5
 
 - Phase 1 channel simulator on PC B with a third UCA222 (Tools > Channel simulator):
-  two-path Watterson with ITU-R F.1487 delays and spreads, noise in 3 kHz, published
+  two-path Watterson profiles based on ITU-R F.1487 delays and spreads, noise in 3 kHz, published
   seeds per attempt, dropout, clipping and peak checks.
 - SNR referred to each arm's RMS power (primary), measured once per arm in its
   Transparent sequence; a -3 dBFS peak ceiling for safety; the PEP-limited profile

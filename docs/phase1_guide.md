@@ -78,8 +78,13 @@ attempt of one stage for the modem in use, in a fixed order, with one RUN per PC
 
 Before a block:
 
-1. Open the modem (Mercury from the GUI; VARA with the Drive recorded in step 4).
-   Disable sleep and automatic updates on the three computers.
+0. Before the campaign, on PC B (and preferably PC A): mains power connected; sleep and
+   hibernation set to "Never"; USB selective suspend disabled (Power options > Advanced
+   settings > USB settings); Windows updates paused; no other use of audio or USB during
+   the block. (On 2026-11-13 the simulator logged four audio dropouts hours after a
+   pilot, outside any attempt; they did not invalidate it, but show why this matters.)
+1. Open the modem (Mercury from the GUI; VARA with the Drive recorded in step 4). VARA
+   needs numeric SSIDs (for example XQ2CG-1 on PC A and XQ2CG-2 on PC B).
 2. Simulator window (PC B): Channel **Automatic: follow PC B's blocks and cells**,
    SNR reference **Equal RMS SNR (primary)**, press **Start simulator**. In Automatic
    mode the simulator takes the condition, attempt number and arm of every attempt
@@ -129,6 +134,18 @@ attempt; with the simulator in Automatic mode they need no simulator setting eit
 Poor traces as the pilot in a series of its own (`VERIFY-poor-200B-01…10`), reported
 apart and never mixed with PILOT or P1. It is run as a single cell (start attempt 1,
 simulator in Automatic mode), PC B first.
+
+## Order of work
+
+1. Bench validation: CAL through the simulator, the 9-test sequence in Transparent
+   for Mercury, VARA free and VARA licensed (power reference saved for each, peaks at
+   or below -3 dBFS), then the kit (Moderate, 200 B, 10 attempts) for the three arms.
+   Done on 2026-11-12.
+2. Pilot (exploratory): the pilot block for each modem; the kit covers Moderate. Done on
+   2026-11-13: all 90 attempts succeeded and the delivery times separated the arms, so
+   the profiles are frozen (phase1_channel_design.md, "Pilot result and decision").
+3. Campaign: the campaign block for each modem, one modem at a time, then the repeat
+   block if the cross-check lists attempts not counted.
 
 ## What is not counted
 
