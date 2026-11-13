@@ -201,4 +201,21 @@ rx_old = dict(rx, condition="good", tag="PILOT-good-200B-01", delivered_intact=N
               failures=["MYCALL: the modem returned WRONG (MYCALL XQ2CG-B)"])
 check(cc.cross_check(em_old, rx_old)["outcome"] == "procedure_fault",
       "cross-check: a rejected MYCALL (earlier client) is a procedure fault, not a counted failure")
+# ---------------------------------------------------------------- restart both PCs at the same position
+r7 = tmp / "r7"
+for k in range(1, 18):
+    make_run(r7, f"P1-good-10KiB-{k:02d}" if k <= 17 else "", "listen", now, condition="good",
+             failures=[] if k < 17 else ["payload not received"])
+plan, done, note = seq.block_plan("listen", "c.toml", "campaign", r7, ARM, start=47)
+check(plan[0]["tag"] == "P1-good-10KiB-17" and len(plan) == 134 and done == 0 and "position 47" in note,
+      "block from position 47: every attempt from P1-good-10KiB-17 on, without skipping")
+check(logic.block_tags("campaign")[46] == "P1-good-10KiB-17" and len(logic.block_tags("pilot")) == 20,
+      "block plan positions")
+cmd = logic.block_commands("A", logic.BLOCK_CAMPAIGN, 47)[0]
+check(cmd[cmd.index("--block-from") + 1] == "47" and "--block-from" not in logic.block_commands("B", logic.BLOCK_CAMPAIGN)[0],
+      "GUI passes the start position; 0 means automatic")
+r8 = tmp / "r8"
+make_run(r8, "P1-good-200B-01", "listen", now, condition="good", failures=["no CONNECTED event was observed"])
+plan, done, _ = seq.block_plan("listen", "c.toml", "campaign", r8, ARM)
+check(done == 0 and plan[0]["tag"] == "P1-good-200B-01", "resume redoes an attempt with a bench fault (no connection in Good)")
 print("ALL BLOCK TESTS PASSED")

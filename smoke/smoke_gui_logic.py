@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 
-APP_VERSION = "0.2.0-alpha.5"
+APP_VERSION = "0.2.0-alpha.6"
 CALLSIGN_RE = re.compile(r"^[A-Z0-9/-]{3,12}$")
 BANDWIDTHS = ["BW500", "BW2300"]
 MODEMS = {"mercury": "Mercury 1.9.19", "vara": "VARA HF 4.9.0"}
@@ -267,12 +267,21 @@ def is_block(test_name: str) -> bool:
     return test_name in BLOCK_TESTS
 
 
-def block_commands(role: str, test_name: str) -> list[list[str]]:
+def block_commands(role: str, test_name: str, start: int = 0) -> list[list[str]]:
+    """start 0: automatic resume; start n: run every attempt from plan position n on."""
     mode = "send" if role == "A" else "listen"
     command = ["smoke_sequence.py", mode, "--block", BLOCK_TESTS[test_name]]
+    if start and BLOCK_TESTS[test_name] != "repeat":
+        command += ["--block-from", str(start)]
     if mode == "send":
         command += ["--gap-s", f"{SEQUENCE_GAP_S:g}"]
     return [command]
+
+
+def block_tags(kind: str) -> list[str]:
+    """The fixed plan of a pilot or campaign block, as tags (position 1 is the first)."""
+    return [campaign_tag(cond, load, k, series) for series, cond, load in BLOCK_CELLS.get(kind, [])
+            for k in range(1, SERIES_ATTEMPTS[series] + 1)]
 
 
 def block_label(kind: str) -> str:
