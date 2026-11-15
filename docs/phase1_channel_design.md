@@ -190,8 +190,9 @@ using XQ2CG-1/-2.
 ## 6. Campaign and minimum replication kit
 
 Software versions in P1: 0.2.0-alpha.5 for the first 46 Mercury attempts (to
-P1-good-10KiB-16), 0.2.0-alpha.6 from then on. alpha.6 only changes how a stopped block is
-resumed; the channel, the measurement, the success rule and the counting are identical,
+P1-good-10KiB-16), 0.2.0-alpha.6 for the rest of the Mercury campaign block, 0.2.0-alpha.7 from the Mercury
+repeat block on (results ZIPs and cross-check unpacking on Windows). alpha.6 and alpha.7
+change only how a stopped block is resumed and how results are packed and unpacked; the channel, the measurement, the success rule and the counting are identical,
 and every run records its version. Mercury 1.9.19 stopped once with an access violation
 on PC A (2026-11-13, during P1-good-10KiB-17); the attempts lost with it are not counted
 and are run again; such crashes are reported separately with their frequency.
