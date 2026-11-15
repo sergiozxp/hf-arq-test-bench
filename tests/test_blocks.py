@@ -218,4 +218,51 @@ r8 = tmp / "r8"
 make_run(r8, "P1-good-200B-01", "listen", now, condition="good", failures=["no CONNECTED event was observed"])
 plan, done, _ = seq.block_plan("listen", "c.toml", "campaign", r8, ARM)
 check(done == 0 and plan[0]["tag"] == "P1-good-200B-01", "resume redoes an attempt with a bench fault (no connection in Good)")
+# ---------------------------------------------------------------- ZIPs and cross-checks (alpha.7)
+import zipfile
+from smoke_common import make_results_zip
+r9 = tmp / "r9"
+(r9 / "p1" / "P1-good-200B-01_20261115T000000Z_abcdef").mkdir(parents=True)
+(r9 / "p1" / "P1-good-200B-01_20261115T000000Z_abcdef" / "result.json").write_text("{}", encoding="utf-8")
+nested = r9 / "cross_checks" / "20261115T154208Z" / "other_pc" / "results_B_x" / "p1"
+nested.mkdir(parents=True)
+(nested / "copy.json").write_text("{}", encoding="utf-8")
+(r9 / "cross_checks" / "20261115T154208Z" / "cross_check_report.json").write_text("{}", encoding="utf-8")
+names = zipfile.ZipFile(make_results_zip(r9, tmp / "zip_r9")).namelist()
+check("p1/P1-good-200B-01_20261115T000000Z_abcdef/result.json" in names
+      and "cross_checks/20261115T154208Z/cross_check_report.json" in names
+      and not any("other_pc" in n for n in names), "results ZIP leaves out the other PC's unpacked results")
+old_zip = tmp / "old_style.zip"
+deep = "cross_checks/20261113T174936Z/other_pc/results_A_20261113_144448_/" + "p1/" + "x" * 200 + "/result.json"
+with zipfile.ZipFile(old_zip, "w") as z:
+    z.writestr("p1/P1-good-200B-01_20261115T000000Z_abcdef/result.json", "{}")
+    z.writestr(deep, "{}")
+out = cc.safe_extract(old_zip, tmp / ("long_" + "y" * 60) / "cross_checks" / "20261115T154208Z" / "other_pc" / "results_B")
+check((out / "p1" / "P1-good-200B-01_20261115T000000Z_abcdef" / "result.json").is_file()
+      and not (out / "cross_checks").exists(), "an older ZIP with nested cross-checks is unpacked without them")
+long_zip = tmp / "long_names.zip"
+long_member = "p1/P1-poor-10KiB-27_20261115T022334Z_abcdef/evidence/end/" + "z" * 180 + ".txt"
+with zipfile.ZipFile(long_zip, "w") as z:
+    z.writestr(long_member, "ok")
+out = cc.safe_extract(long_zip, tmp / ("long_" + "w" * 60) / "other_pc")
+check((out / long_member).is_file(), "paths longer than 260 characters are unpacked (extended-length paths on Windows)")
+r10 = tmp / "r10"
+(r10 / "cross_checks" / "20261113T000000Z").mkdir(parents=True)
+(r10 / "cross_checks" / "20261113T000000Z" / "cross_check_report.json").write_text(
+    json.dumps({"created_utc": now.isoformat(), "pairs": rows_for_repeat}) if False else json.dumps(report), encoding="utf-8")
+(r10 / "cross_checks" / "20261115T154208Z" / "other_pc").mkdir(parents=True)
+try:
+    seq.block_plan("listen", "c.toml", "repeat", r10, ARM)
+    check(False, "repeat refuses an unfinished last cross-check")
+except ValueError as error:
+    check("did not finish" in str(error), "repeat refuses an unfinished last cross-check (no fallback to an older one)")
+r11 = tmp / "r11"
+(r11 / "cross_checks" / "20261115T160000Z").mkdir(parents=True)
+(r11 / "cross_checks" / "20261115T160000Z" / "cross_check_report.json").write_text(
+    json.dumps({"created_utc": now.isoformat(), "pairs": [{"arm": "Mercury 1.9.19", "tag": "E0-1_16B"}]}), encoding="utf-8")
+try:
+    seq.block_plan("listen", "c.toml", "repeat", r11, ARM)
+    check(False, "repeat refuses a cross-check without this modem's Phase 1 attempts")
+except ValueError as error:
+    check("no Phase 1 attempts" in str(error), "repeat refuses a cross-check without this modem's Phase 1 attempts")
 print("ALL BLOCK TESTS PASSED")

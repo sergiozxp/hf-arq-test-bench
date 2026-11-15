@@ -523,3 +523,21 @@ class TcpCapture:
         for f in (self._rx, self._tx, self._idx, self._txidx):
             f.close()
 
+
+
+def make_results_zip(results: Path, base_name: str | Path) -> str:
+    """ZIP of the results folder, without the other PC's results unpacked by earlier
+    cross-checks (results/cross_checks/*/other_pc). Those copies are not needed (each PC
+    sends its own ZIP), and nesting them made paths longer than Windows' 260-character
+    limit when the next cross-check unpacked the ZIP (2026-11-15)."""
+    import zipfile
+    archive = Path(str(base_name) + ".zip")
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+        for path in sorted(results.rglob("*")):
+            relative = path.relative_to(results)
+            parts = relative.parts
+            if len(parts) >= 3 and parts[0] == "cross_checks" and parts[2] == "other_pc":
+                continue
+            if path.is_file():
+                z.write(path, relative.as_posix())
+    return str(archive)
