@@ -28,6 +28,7 @@ from __future__ import annotations
 from mercury_smoke_client import has_setup_fault
 import csv
 import json
+import os
 import re
 import sys
 import zipfile
@@ -183,15 +184,25 @@ def cross_check(em: dict, rx: dict) -> dict:
 
 # ------------------------------------------------------------------ session pairing
 def safe_extract(archive: Path, destination: Path) -> Path:
-    """Extract a ZIP, refusing members that would land outside the destination."""
+    """Extract a ZIP, refusing members that would land outside the destination.
+
+    The other PC's own cross-checks (cross_checks/...) are not extracted: pairing does not
+    use them, and ZIPs made before 0.2.0-alpha.7 nest earlier copies of this PC's results
+    there, with paths longer than Windows' 260-character limit. On Windows the extraction
+    also uses extended-length paths."""
     destination.mkdir(parents=True, exist_ok=True)
     root = destination.resolve()
     with zipfile.ZipFile(archive) as z:
+        members = []
         for member in z.infolist():
             target = (destination / member.filename).resolve()
             if root != target and root not in target.parents:
                 raise ValueError(f"unsafe path in ZIP: {member.filename}")
-        z.extractall(destination)
+            if member.filename.replace("\\", "/").split("/")[0] == "cross_checks":
+                continue
+            members.append(member)
+        base = "\\\\?\\" + str(root) if os.name == "nt" else str(root)
+        z.extractall(base, members=members)
     return destination
 
 

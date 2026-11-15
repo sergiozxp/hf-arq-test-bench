@@ -42,7 +42,7 @@ from pathlib import Path
 import mercury_smoke_client
 import smoke_gui_logic as logic
 import vara_runtime as vara
-from smoke_common import load_config
+from smoke_common import load_config, make_results_zip
 
 DEFAULT_GAP_S = 45
 # After a same-session ACK test the receiver ends later: the sender disconnects as soon
@@ -126,13 +126,19 @@ def local_runs(results: Path, mode: str, arm: str) -> list[dict]:
 
 
 def latest_cross_check(results: Path) -> tuple[Path | None, dict | None]:
-    reports = sorted((results / "cross_checks").glob("*/cross_check_report.json"))
-    for path in reversed(reports):
-        try:
-            return path, json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-    return None, None
+    """The most recent cross-check. If it did not finish (no report), there is no fallback
+    to an older one: on 2026-11-15 a failed cross-check made the repeat block read the
+    previous one and find nothing to repeat."""
+    folders = sorted(p for p in (results / "cross_checks").glob("*") if p.is_dir())
+    if not folders:
+        return None, None
+    path = folders[-1] / "cross_check_report.json"
+    try:
+        return path, json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ValueError(f"the last cross-check ({folders[-1].name}) did not finish: run "
+                         "'Cross-check with the other PC's ZIP' again and check that it ends with "
+                         "the cell table") from None
 
 
 def repeat_list(report: dict, arm: str) -> list[tuple[str, str, str, int]]:
@@ -172,6 +178,9 @@ def block_plan(mode: str, config: str, kind: str, results: Path, arm: str,
         if report is None:
             raise ValueError("no cross-check yet: exchange the ZIPs and cross-check on this PC first")
         created = datetime.fromisoformat(report["created_utc"])
+        if not any(row.get("arm") == arm and "condition" in row for row in report.get("pairs") or []):
+            raise ValueError(f"the last cross-check ({path.parent.name}) has no Phase 1 attempts of "
+                             f"{arm}: cross-check again with the other PC's latest ZIP")
         wanted = repeat_list(report, arm)
         plan = [cell_step(mode, config, *item) for item in wanted]
         # resume: an attempt already run again after this cross-check is not run a third time
@@ -301,7 +310,7 @@ def bench_fault(result: dict | None, condition: str) -> str | None:
 def make_zip(results: Path, role: str, arm: str, kind: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "", arm.replace("unlicensed", "free"))
     name = Path.cwd() / f"results_{role}_{slug}_{kind}_{utc_now():%Y%m%d_%H%M%S}"
-    return shutil.make_archive(str(name), "zip", str(results))
+    return make_results_zip(results, name)
 
 
 def run_step(args_list: list[str]) -> int:

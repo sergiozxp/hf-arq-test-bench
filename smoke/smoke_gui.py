@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 import smoke_gui_logic as logic
+from smoke_common import make_results_zip
 
 if __name__ == "__main__" and len(sys.argv) >= 3 and sys.argv[1] == "--script":
     sys.exit(logic.run_script(sys.argv[2], sys.argv[3:]))
@@ -1117,7 +1118,7 @@ class ModemSmokeWindow(tk.Tk):
             messagebox.showinfo("Results", "There are no results yet.")
             return
         destination = HERE / f"results_{self.values['role'].get()}_{time.strftime('%Y%m%d_%H%M%S')}"
-        archive = shutil.make_archive(str(destination), "zip", str(RESULTS))
+        archive = make_results_zip(RESULTS, destination)
         messagebox.showinfo("Results ZIP", f"Created:\n{archive}")
 
     def _cross_check_zip(self) -> None:
