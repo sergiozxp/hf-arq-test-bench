@@ -310,6 +310,54 @@ def median(values: list[float]) -> float | None:
     return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
 
 
+SESSION_SKEW_S = 120     # PC A's and PC B's CONNECTED of one session (the PCs' clocks agree within seconds)
+
+
+def run_times(run: dict) -> dict:
+    """First CONNECTED and last event (UTC) of a run, from its events.jsonl."""
+    out = {"connected": None, "end": None}
+    path = run["path"].with_name("events.jsonl")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                t = event.get("t_utc")
+                if not t:
+                    continue
+                if (out["connected"] is None and event.get("event") == "line_received"
+                        and re.match(r"^\s*CONNECTED\b", str(event.get("text", "")))):
+                    out["connected"] = datetime.fromisoformat(t)
+                out["end"] = datetime.fromisoformat(t)
+    except OSError:
+        pass
+    return out
+
+
+def step_reasons(sender: dict, receiver: dict, sim: dict | None) -> list[str]:
+    """Phase 1: the two runs and the simulator attempt must belong to the same session. On
+    2026-11-16 the PCs went out of step (PC B one attempt behind) and runs with the same tag
+    were paired although they were different sessions."""
+    reasons = []
+    st, rt = run_times(sender), run_times(receiver)
+    if st["connected"] and rt["connected"]:
+        skew = abs((st["connected"] - rt["connected"]).total_seconds())
+        if skew > SESSION_SKEW_S:
+            reasons.append(f"PC A and PC B were in different sessions (CONNECTED {skew:.0f} s apart): "
+                           "the PCs were out of step")
+    if sim is not None and st["end"] is not None:
+        # It may start a little before PC A's run (stray audio after PC B's announcement),
+        # never after PC A's run has ended.
+        if sim["start"] > st["end"]:
+            reasons.append("the simulator attempt started after PC A's run had ended: the PCs were out of step")
+    rx = " ".join(receiver["result"].get("failures") or [])
+    if "outside the CONNECTED session" in rx or "sessions in one run" in rx:
+        reasons.append("PC B's run also received another session: the PCs were out of step")
+    return reasons
+
+
 def attach_simulator(row: dict, sender: dict, receiver: dict, sim_attempts: list[dict]) -> None:
     """Phase 1 pairs: the simulator attempt must exist, match and be valid, or the pair is not counted."""
     match = P1_TAG_RE.match(sender["tag"])
@@ -342,6 +390,8 @@ def attach_simulator(row: dict, sender: dict, receiver: dict, sim_attempts: list
             reasons.append(f"the simulator used attempt {sim['attempt']}'s trace for attempt {attempt}")
         if not sim["valid"]:
             reasons.extend(sim["problems"] or ["simulator attempt not valid"])
+    if "path" in sender and "path" in receiver:
+        reasons.extend(step_reasons(sender, receiver, near[0] if near else None))
     if reasons and row["outcome"] in ("passed", "failed"):
         row["attempt_outcome"] = row["outcome"]
         row["outcome"] = "not_counted"

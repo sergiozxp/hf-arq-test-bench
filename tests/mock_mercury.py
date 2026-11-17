@@ -39,6 +39,13 @@ def start_endpoint(name: str, peer: str, command_port: int, data_port: int) -> N
                     return
                 if MODE == "truncated":
                     payload = payload[: len(payload) // 2]
+                if MODE == "drop_session" and name == "A":
+                    # The link is lost in the middle of the transfer (VARA licensed, Poor, 2026-11-16).
+                    STATE[peer]["data_socket"].sendall(payload[: len(payload) // 2])
+                    time.sleep(0.5)
+                    for endpoint in (name, peer):
+                        STATE[endpoint]["command_socket"].sendall(b"DISCONNECTED\r")
+                    continue
                 STATE[peer]["data_socket"].sendall(payload)
                 if MODE == "extra":
                     time.sleep(0.3)
@@ -66,6 +73,10 @@ def start_endpoint(name: str, peer: str, command_port: int, data_port: int) -> N
                 command_socket.sendall(
                     b"WRONG\r" if MODE == "disconnect_wrong" and parts[0] == "DISCONNECT" else b"OK\r"
                 )
+                if parts[0] == "CONNECT" and MODE == "no_answer":
+                    time.sleep(1.0)       # the call is not answered: the caller's modem gives up
+                    command_socket.sendall(b"DISCONNECTED\r")
+                    continue
                 if parts[0] == "CONNECT":
                     time.sleep(0.3)
                     for endpoint in (name, peer):

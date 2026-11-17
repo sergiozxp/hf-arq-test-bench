@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 
-APP_VERSION = "0.2.0-alpha.7"
+APP_VERSION = "0.2.0-alpha.8"
 CALLSIGN_RE = re.compile(r"^[A-Z0-9/-]{3,12}$")
 BANDWIDTHS = ["BW500", "BW2300"]
 MODEMS = {"mercury": "Mercury 1.9.19", "vara": "VARA HF 4.9.0"}
