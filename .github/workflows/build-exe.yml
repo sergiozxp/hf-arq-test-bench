@@ -63,6 +63,7 @@ jobs:
           python tests/test_channel_sim.py
           python tests/test_blocks.py
           python tests/test_no_buffer0.py
+          python tests/test_sync.py
           python smoke/channel_sim.py list
           python tests/test_launcher.py --launcher "python smoke/smoke_gui.py"
       - name: Download the official Mercury 1.9.19 Windows ZIP

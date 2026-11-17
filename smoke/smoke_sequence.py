@@ -302,6 +302,8 @@ def bench_fault(result: dict | None, condition: str) -> str | None:
     if mercury_smoke_client.has_setup_fault(result):
         return "procedure fault (" + (result.get("procedure_fault_detail") or "setup command rejected")[:120] + ")"
     failures = " ".join(result.get("failures") or [])
+    if "sessions in one run" in failures or "outside the CONNECTED session" in failures:
+        return "PC B received another attempt's session: the PCs were out of step"
     if condition in NO_CONNECT_IS_FAULT and "no CONNECTED event" in failures:
         return f"no connection in the {condition} condition"
     return None

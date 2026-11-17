@@ -352,6 +352,9 @@ class TcpCapture:
         self._txidx = open(rlog.dir / f"raw_tx_{name}.idx.jsonl", "w", encoding="utf-8")
         self._tx_off = 0
         self.tx_times: dict[str, int] = {}   # label -> monotonic time of its first send
+        # Optional callable: returns a reason (str) to stop waiting for data, e.g. because the
+        # modem reported DISCONNECTED (Phase 1, alpha.8), or None to keep waiting.
+        self.stop_check = None
         self.sock = socket.create_connection((host, port), timeout=10)
         self.sock.settimeout(0.5)
         self._stop = threading.Event()
@@ -475,7 +478,10 @@ class TcpCapture:
                 if resto <= 0:
                     raise TimeoutError(f"{idle_s} s sin bytes nuevos "
                                        f"({len(self.buf)}/{n} recibidos)")
-                self.cond.wait(timeout=resto)
+                why = self.stop_check() if self.stop_check else None
+                if why:
+                    raise ConnectionError(f"{why} ({len(self.buf)}/{n} bytes received)")
+                self.cond.wait(timeout=min(resto, 0.5))
                 if len(self.buf) != ultimo:
                     ultimo = len(self.buf)
                     limite = time.monotonic() + idle_s
@@ -502,7 +508,10 @@ class TcpCapture:
                 if resto <= 0:
                     raise TimeoutError(f"{timeout_s} s without {delimiter!r} "
                                        f"({len(self.buf)} bytes pending)")
-                self.cond.wait(timeout=resto)
+                why = self.stop_check() if self.stop_check else None
+                if why:
+                    raise ConnectionError(f"{why} ({len(self.buf)} bytes pending)")
+                self.cond.wait(timeout=min(resto, 0.5))
 
     def holds(self, delimiter: bytes) -> bool:
         """Whether unread data already contains delimiter."""

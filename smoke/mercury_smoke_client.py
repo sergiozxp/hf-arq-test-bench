@@ -12,10 +12,13 @@ modem is selected by [modem] name in the configuration.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import time
 import traceback
+from datetime import datetime, timezone
+from pathlib import Path
 
 from smoke_common import (HEADER_LEN, RunLog, TcpCapture, ack_run, capture_environment,
                           capture_final, load_config, evidence_issues, make_ack, make_header,
@@ -264,6 +267,35 @@ def has_setup_fault(res: dict) -> bool:
     return any(str(f).startswith(SETUP_LABELS) for f in res.get("failures") or [])
 
 
+SESSION_ENDED = "the session ended (DISCONNECTED)"
+CALLER_SILENCE_S = 60.0     # PC B: PC A silent this long after calling, without CONNECTED: A gave up
+
+
+def session_ended(cmd: TcpCapture, start: int) -> bool:
+    """Whether the modem has reported DISCONNECTED since command line index start."""
+    return cmd.wait_line(RX_DISCONNECTED, 0, start=start) is not None
+
+
+def caller_gave_up(cfg: dict, tag: str, silence_s: float = CALLER_SILENCE_S) -> bool:
+    """PC B, Phase 1 with the simulator in Automatic mode (same PC): the simulator has
+    started the attempt PC B announced (PC A's call was heard) and PC A has then been
+    silent for silence_s. PC A's call has failed and PC A will go on to the next attempt,
+    so PC B must stop listening for this one (2026-11-16: PC B kept listening and took PC
+    A's next attempt as this one, and the PCs went out of step)."""
+    results = Path(cfg.get("general", {}).get("results_dir", "results"))
+    folders = sorted((results / "simulator").glob("*/status.json"))
+    if not folders:
+        return False
+    try:
+        status = json.loads(folders[-1].read_text(encoding="utf-8"))
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(status["t_utc"])).total_seconds()
+    except (OSError, ValueError, KeyError):
+        return False
+    since = status.get("seconds_since_audio")
+    return (status.get("mode") == "auto" and age < 15 and status.get("tag") == tag
+            and since is not None and since >= silence_s)
+
+
 BUFFER0_MISSING = "BUFFER 0 was not observed after writing (timeout or socket closed)"
 
 
@@ -372,11 +404,26 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     if not failures:
         responses["connect"] = send_command(cmd, f"CONNECT {m['mycall']} {m['peer_call']}", win)
         if judge_command(responses["connect"], "CONNECT", failures, warnings, req):
-            r = cmd.wait_line(RX_CONNECTED, bounded(m["connect_timeout_s"]), start=idx0)
+            if args.condition:
+                # Phase 1 (alpha.8): the attempt ends when the modem gives up the call
+                # (DISCONNECTED without CONNECTED), not at the deadline.
+                r = None
+                while bounded(m["connect_timeout_s"]) > 0:
+                    r = cmd.wait_line(RX_CONNECTED, min(1.0, bounded(m["connect_timeout_s"])), start=idx0)
+                    if r is not None or session_ended(cmd, idx0):
+                        break
+            else:
+                r = cmd.wait_line(RX_CONNECTED, bounded(m["connect_timeout_s"]), start=idx0)
             if r is None:
-                failures.append("no CONNECTED event was observed")
+                failures.append("no CONNECTED event was observed"
+                                + (" (the modem gave up the call)" if args.condition and session_ended(cmd, idx0)
+                                   else ""))
             else:
                 t_conn = r[1][0]
+                if args.condition:
+                    # Phase 1 (alpha.8): waits for data end when the session ends.
+                    idx_c = r[0]
+                    data.stop_check = lambda: SESSION_ENDED if session_ended(cmd, idx_c) else None
                 res["connected"] = parse_connected(r[1][1], m["bw_command"], m["mycall"],
                                                    m["peer_call"], "send")
                 failures += connected_failures(res["connected"])
@@ -398,6 +445,8 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                         b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", min(0.5, bounded(1e9)),
                                                  start=idx_w, t_min_ns=t_w0)
                         if b0 is not None or data.holds(b"\n") or data.closed:
+                            break
+                        if data.stop_check and data.stop_check():
                             break
                 else:
                     b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", bounded(m["transfer_timeout_s"]),
@@ -422,9 +471,13 @@ def run_send(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                     # Raw evidence, kept as in every earlier version. Phase 1 judges it below
                     # (counted_success) as a warning when B's ACK was verified.
                     failures.append(BUFFER0_MISSING)
-                # The session is active, so DISCONNECT must be accepted.
-                responses["disconnect"] = send_command(cmd, "DISCONNECT", win)
-                judge_command(responses["disconnect"], "DISCONNECT", failures, warnings, req)
+                data.stop_check = None
+                if args.condition and session_ended(cmd, r[0]):
+                    pass        # the session is already over: nothing to disconnect
+                else:
+                    # The session is active, so DISCONNECT must be accepted.
+                    responses["disconnect"] = send_command(cmd, "DISCONNECT", win)
+                    judge_command(responses["disconnect"], "DISCONNECT", failures, warnings, req)
     if end_ns is not None and not res.get("ack_verified") and mono_ns() >= end_ns:
         res["deadline_reached"] = True
         failures.append(f"deadline of {deadline_s:.0f} s reached before a verified ACK")
@@ -457,7 +510,12 @@ def send_ack(res: dict, cmd: TcpCapture, data: TcpCapture, header: bytes, sha: s
     res["ack_sent"] = True
     res["ack_line"] = ack.decode("ascii").strip()
     # Recorded, not judged: the sender's verification is the pass criterion.
-    b0 = cmd.wait_line_after(r"^\s*BUFFER\s+0\b", m.get("ack_timeout_s", 300), start=idx, t_min_ns=t0)
+    # Stop at DISCONNECTED too: VARA may never report BUFFER 0 for the ACK, and waiting the
+    # whole ACK timeout kept PC B listening into PC A's next attempt (2026-11-16).
+    b0 = cmd.wait_line_after(r"^\s*(BUFFER\s+0\b|DISCONNECTED\b)", m.get("ack_timeout_s", 300),
+                             start=idx, t_min_ns=t0)
+    if b0 is not None and not re.search(r"^\s*BUFFER\s+0\b", b0[1][1]):
+        b0 = None
     res["ack_arq_confirmed"] = b0 is not None
     res["ack_arq_s"] = seconds_between(t0, b0[1][0]) if b0 else None
 
@@ -494,11 +552,27 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
         responses["listen"] = send_command(cmd, "LISTEN ON", win)
         if judge_command(responses["listen"], "LISTEN ON", failures, warnings, req):
             rlog.log("waiting_for_connection")
-            r = cmd.wait_line(RX_CONNECTED, m["listen_timeout_s"], start=idx0)
+            if args.condition:
+                limit = time.monotonic() + m["listen_timeout_s"]
+                r = None
+                while time.monotonic() < limit:
+                    r = cmd.wait_line(RX_CONNECTED, min(1.0, max(0.0, limit - time.monotonic())), start=idx0)
+                    if r is not None:
+                        break
+                    if caller_gave_up(cfg, args.tag):
+                        res["caller_gave_up"] = True
+                        break
+            else:
+                r = cmd.wait_line(RX_CONNECTED, m["listen_timeout_s"], start=idx0)
             if r is None:
-                failures.append("no CONNECTED event was observed")
+                failures.append("no CONNECTED event was observed"
+                                + (" (PC A's call was heard, then PC A stopped calling)"
+                                   if res.get("caller_gave_up") else ""))
             else:
                 t_conn = r[1][0]
+                if args.condition:
+                    idx_c = r[0]
+                    data.stop_check = lambda: SESSION_ENDED if session_ended(cmd, idx_c) else None
                 res["connected"] = parse_connected(r[1][1], m["bw_command"], m["mycall"],
                                                    m["peer_call"], "listen")
                 failures += connected_failures(res["connected"])
@@ -527,6 +601,7 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                 except (TimeoutError, ConnectionError, ValueError) as e:
                     failures.append(f"data port read failed: {e!r}")
 
+                data.stop_check = None
                 # Extra bytes: wait a grace period, then count everything received.
                 time.sleep(m["extra_bytes_grace_s"])
                 d = cmd.wait_line(RX_DISCONNECTED, m["disconnect_wait_s"]
@@ -562,6 +637,10 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
     # modem was still listening from an earlier run). Not a modem failure.
     with cmd.cond:
         lines_ns = list(cmd.lines[idx_start:])
+    # A DISCONNECTED answering this run's own cleanup DISCONNECT (no session) is not early.
+    cleanup_ns = cmd.tx_times.get("DISCONNECT")
+    if cleanup_ns is not None and t_conn is None:
+        lines_ns = [(t, txt) for t, txt in lines_ns if t < cleanup_ns]
     early = early_session(data.chunks, cmd.tx_times.get("LISTEN ON"), lines_ns, t_conn)
     if early:
         res["procedure_fault"] = True
@@ -573,6 +652,14 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
 
     if res["final_state"] != "disconnected":
         failures.append("DISCONNECTED was not confirmed")
+    with cmd.cond:
+        sessions = sum(1 for _t, txt in cmd.lines[idx_start:] if re.search(RX_CONNECTED, txt))
+    res["sessions_in_run"] = sessions
+    if sessions > 1:
+        res["procedure_fault"] = True
+        res["procedure_fault_detail"] = f"{sessions} sessions in one run: the PCs were out of step"
+        failures.insert(0, f"PROCEDURE: {sessions} sessions in one run (PC A's next attempt reached this "
+                           "run): the PCs were out of step")
     finish(res, cmd, m, responses, failures, warnings, idx_start)
     res["delivered_intact"] = (not failures and res.get("matches_expected_payload") is True
                                and res.get("truncated_hash_matches") is True)
