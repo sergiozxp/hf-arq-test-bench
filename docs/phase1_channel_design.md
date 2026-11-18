@@ -146,7 +146,9 @@ same-session ACK (E0-3 procedure).
 
 **Staying in step (alpha.8).** In a Phase 1 attempt each side ends when the session ends
 (DISCONNECTED), PC A ends when its modem gives up the call, and PC B ends an attempt without
-connection when the simulator has heard PC A's call and PC A has then been silent for 60 s.
+connection when the simulator has heard PC A's call and PC A has then been silent for 60 s
+(alpha.9: only audio after 30 s of silence counts as PC A's call, so the tail of PC A's
+previous session does not).
 A pair counts only if both runs were the same session (CONNECTED within 120 s), the simulator
 attempt started before PC A's run ended, and PC B's run received no other session. (On
 2026-11-16 PC B fell behind PC A four times during the VARA licensed block; those attempts

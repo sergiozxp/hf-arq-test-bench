@@ -231,7 +231,11 @@ check(len(ends) == 1 and ends[0]["valid"] and ends[0]["tag"] == "P1-moderate-200
       and ends[0]["directions"]["A->B"].get("effective_snr_db") is not None,
       "auto: PC B's 'finished' ends the attempt, with its effective SNR")
 auto2.offer(entry("e2", "listening", cond="poor", k=7, a="Mercury 1.9.19"))
-feed(auto2, np.concatenate([burst(5, -6.0), silence(1)]), silence(6))
+# The tail of PC A's previous session right after the announcement is not PC A's call.
+feed(auto2, np.concatenate([burst(3, -6.0), silence(1)]), silence(4))
+check(len([e for e in events if e["event"] == "attempt_start"]) == 1,
+      "auto: PC A's audio without 30 s of silence before it does not start the announced attempt")
+feed(auto2, np.concatenate([silence(31), burst(5, -6.0), silence(1)]), silence(37))
 auto2.finish()
 last = [e for e in events if e["event"] == "attempt_end"][-1]
 check(last["attempt"] == 7 and not last["valid"] and any("no RMS power reference" in p for p in last["problems"]),
