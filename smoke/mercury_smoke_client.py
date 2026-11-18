@@ -608,16 +608,20 @@ def run_listen(args, cfg, rlog, cmd: TcpCapture, data: TcpCapture) -> dict:
                                   + (m.get("ack_timeout_s", 300) if args.ack else 0), start=idx0)
                 if d:
                     t_disc = d[1][0]
+    if args.condition and "listen" in responses and t_conn is None:
+        # Phase 1, no session (alpha.9): stop answering calls first, so that PC A's next
+        # call cannot connect while this run winds down (2026-11-18).
+        responses["listen_off"] = send_command(cmd, "LISTEN OFF", win)
     res["final_state"], res["cleanup_disconnect"] = ensure_disconnected(
         cmd, m["disconnect_wait_s"], idx0, win)
-    if "listen" in responses:
+    if "listen" in responses and "listen_off" not in responses:
         # Mercury 1.9.19 stays LISTENING after the TCP client leaves (listen_enabled is
         # kept) and buffers what a caller sends until the next client connects. Release
         # it, so that a sender started too early fails cleanly instead of delivering
         # into the next run.
         responses["listen_off"] = send_command(cmd, "LISTEN OFF", win)
-        if responses["listen_off"]["response"] != "OK":
-            warnings.append(f"LISTEN OFF: no OK ({responses['listen_off']['lines']})")
+    if "listen_off" in responses and responses["listen_off"]["response"] != "OK":
+        warnings.append(f"LISTEN OFF: no OK ({responses['listen_off']['lines']})")
 
     esperado_total = HEADER_LEN + res.get("declared_length", 0)
     total = sum(n for _, n in data.chunks)

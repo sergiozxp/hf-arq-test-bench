@@ -352,6 +352,8 @@ def step_reasons(sender: dict, receiver: dict, sim: dict | None) -> list[str]:
         # never after PC A's run has ended.
         if sim["start"] > st["end"]:
             reasons.append("the simulator attempt started after PC A's run had ended: the PCs were out of step")
+    if receiver["result"].get("caller_gave_up") and st["connected"]:
+        reasons.append("PC B stopped listening before PC A's call connected: the PCs were out of step")
     rx = " ".join(receiver["result"].get("failures") or [])
     if "outside the CONNECTED session" in rx or "sessions in one run" in rx:
         reasons.append("PC B's run also received another session: the PCs were out of step")

@@ -164,4 +164,13 @@ check(any("another session" in r for r in cc.step_reasons(sender, absorbed, None
       "PC B's run that also received another session: refused")
 check(seq.bench_fault({"failures": ["PROCEDURE: 2 sessions in one run (PC A's next attempt reached this run)"]},
                       "poor") is not None, "guard: two sessions in one run is a bench fault")
+gave_up = fake_run(temporary / "x" / "r4", now + timedelta(seconds=11), now + timedelta(seconds=20), now)
+gave_up["result"] = {"failures": ["no CONNECTED event was observed (PC A's call was heard, then PC A stopped calling)"],
+                     "caller_gave_up": True}
+check(any("stopped listening before PC A's call" in r for r in cc.step_reasons(sender, gave_up, None)),
+      "PC B gave up while PC A's call then connected: refused (not a modem failure)")
+events = [json.loads(l) for l in Path(glob.glob(str(temporary / "results_B" / "p1" / "P1-poor-200B-02_*" / "events.jsonl"))[0]).read_text(encoding="utf-8").splitlines() if l.strip()]
+sent = [e.get("label") for e in events if e.get("event") == "tx"]
+check("LISTEN OFF" in sent and ("DISCONNECT" not in sent or sent.index("LISTEN OFF") < sent.index("DISCONNECT")),
+      "PC B without a session stops answering calls (LISTEN OFF) before its cleanup DISCONNECT")
 print("ALL SYNC TESTS PASSED")

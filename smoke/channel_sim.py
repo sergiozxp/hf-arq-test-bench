@@ -338,7 +338,10 @@ class SimulatorCore:
         if rms_l > 0 and 20 * math.log10(rms_l) > ACTIVE_DBFS:
             gap = t_s - self.last_active >= SILENCE_S
             if self.mode == AUTO:
-                if gap or not self.started:
+                # Only audio after 30 s of silence can start an attempt: the tail of PC A's
+                # previous session (its modem still closing it after PC B announced the next
+                # attempt) is not PC A's call (2026-11-18: it made PC B give up too early).
+                if gap:
                     self._audio_after_silence(t_s)
             elif gap or not self.started:
                 self._start_attempt(t_s)
