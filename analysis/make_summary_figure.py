@@ -49,8 +49,8 @@ for ax, (load, title, div, unit) in zip(axes, panels):
     ax.grid(axis="y", color=GRID, linewidth=0.6); ax.set_axisbelow(True)
 handles, labels = axes[0].get_legend_handles_labels()
 fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.06, 0.885), ncol=3, frameon=False)
-fig.text(0.01, 0.985, "Lower is better. In poor conditions both VARA versions deliver in about half Mercury's time;\n"
-             "for files on a good channel, the VARA licence makes the biggest difference.", fontsize=9.5,
+fig.text(0.01, 0.985, "Lower is better. In poor conditions both VARA versions deliver a short message in about half Mercury's time\n"
+             "and a file in about 30 % less time; for files on a good channel, the VARA licence makes the biggest difference.", fontsize=9.5,
              color=INK, ha="left", va="top")
 fig.text(0.01, 0.045, "Bars: median time of the attempts that arrived (30 attempts per modem), lower is better. Lines: 95 % confidence interval of the median.\n"
          "Every attempt arrived, except where a label shows how many of 30 did. Simulated HF channel, 500 Hz modem bandwidth.",
