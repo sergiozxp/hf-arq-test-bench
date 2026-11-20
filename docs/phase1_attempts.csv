@@ -1,0 +1,541 @@
+arm,profile,load,attempt,outcome,delivery_time_s,effective_snr_ab_db,effective_snr_ba_db,buffer0_missing
+Mercury 1.9.19,good,10KiB,1,success,419.5528352,9.51,10.52,False
+Mercury 1.9.19,good,10KiB,2,success,427.7579927,9.5,10.41,False
+Mercury 1.9.19,good,10KiB,3,success,417.6087237,9.51,10.38,False
+Mercury 1.9.19,good,10KiB,4,success,431.8473784,9.5,10.41,False
+Mercury 1.9.19,good,10KiB,5,success,444.5516083,9.52,10.37,False
+Mercury 1.9.19,good,10KiB,6,success,417.7779761,9.51,10.5,False
+Mercury 1.9.19,good,10KiB,7,success,424.6807843,9.51,10.38,False
+Mercury 1.9.19,good,10KiB,8,success,413.6149688,9.5,10.44,False
+Mercury 1.9.19,good,10KiB,9,success,413.0209325,9.51,10.37,False
+Mercury 1.9.19,good,10KiB,10,success,430.9269008,9.5,10.46,False
+Mercury 1.9.19,good,10KiB,11,success,412.9010891,9.51,10.4,False
+Mercury 1.9.19,good,10KiB,12,success,419.6958854,9.51,10.4,False
+Mercury 1.9.19,good,10KiB,13,success,427.196104,9.52,10.38,False
+Mercury 1.9.19,good,10KiB,14,success,417.2472339,9.51,10.36,False
+Mercury 1.9.19,good,10KiB,15,success,444.0711441,9.52,10.36,False
+Mercury 1.9.19,good,10KiB,16,success,417.9282363,9.51,10.43,False
+Mercury 1.9.19,good,10KiB,17,success,414.264135,9.5,10.39,False
+Mercury 1.9.19,good,10KiB,18,success,423.8502944,9.5,10.32,False
+Mercury 1.9.19,good,10KiB,19,success,428.2605703,9.5,10.39,False
+Mercury 1.9.19,good,10KiB,20,success,414.7559137,9.51,10.41,False
+Mercury 1.9.19,good,10KiB,21,success,423.0610247,9.51,10.41,False
+Mercury 1.9.19,good,10KiB,22,success,414.6488276,9.51,10.4,False
+Mercury 1.9.19,good,10KiB,23,success,411.4530609,9.5,10.42,False
+Mercury 1.9.19,good,10KiB,24,success,425.8906702,9.51,10.39,False
+Mercury 1.9.19,good,10KiB,25,success,411.5405324,9.53,10.41,False
+Mercury 1.9.19,good,10KiB,26,success,435.5110546,9.51,10.39,False
+Mercury 1.9.19,good,10KiB,27,success,430.4037987,9.51,10.33,False
+Mercury 1.9.19,good,10KiB,28,success,418.0146064,9.51,10.41,False
+Mercury 1.9.19,good,10KiB,29,success,424.884654,9.5,10.39,False
+Mercury 1.9.19,good,10KiB,30,success,440.6198542,9.51,10.34,False
+Mercury 1.9.19,good,200B,1,success,65.4936118,10.01,9.9,False
+Mercury 1.9.19,good,200B,2,success,41.4222894,10.03,9.88,False
+Mercury 1.9.19,good,200B,3,success,41.5658645,10.03,9.9,False
+Mercury 1.9.19,good,200B,4,success,41.3642206,10.03,9.84,False
+Mercury 1.9.19,good,200B,5,success,41.4740955,10.06,9.89,False
+Mercury 1.9.19,good,200B,6,success,41.5027162,10.05,9.88,False
+Mercury 1.9.19,good,200B,7,success,51.5276286,10.05,11.36,False
+Mercury 1.9.19,good,200B,8,success,41.3796368,10.04,9.89,False
+Mercury 1.9.19,good,200B,9,success,41.4357812,10.02,9.86,False
+Mercury 1.9.19,good,200B,10,success,41.5562198,10.04,9.86,False
+Mercury 1.9.19,good,200B,11,success,41.4610707,10.02,9.88,False
+Mercury 1.9.19,good,200B,12,success,41.3517848,10.0,9.87,False
+Mercury 1.9.19,good,200B,13,success,41.4547653,10.03,9.91,False
+Mercury 1.9.19,good,200B,14,success,41.3503801,10.04,9.85,False
+Mercury 1.9.19,good,200B,15,success,60.8664249,10.02,10.0,False
+Mercury 1.9.19,good,200B,16,success,41.4057379,10.03,9.9,False
+Mercury 1.9.19,good,200B,17,success,41.4364041,10.04,9.83,False
+Mercury 1.9.19,good,200B,18,success,51.8004812,10.0,9.87,False
+Mercury 1.9.19,good,200B,19,success,41.5131736,10.04,9.88,False
+Mercury 1.9.19,good,200B,20,success,41.5462037,10.02,9.88,False
+Mercury 1.9.19,good,200B,21,success,41.4940293,9.99,9.88,False
+Mercury 1.9.19,good,200B,22,success,41.3817714,10.05,9.87,False
+Mercury 1.9.19,good,200B,23,success,41.572496,10.03,9.86,False
+Mercury 1.9.19,good,200B,24,success,53.2073789,10.08,9.88,False
+Mercury 1.9.19,good,200B,25,success,41.3992439,10.03,9.85,False
+Mercury 1.9.19,good,200B,26,success,41.4481006,10.05,9.83,False
+Mercury 1.9.19,good,200B,27,success,73.5237869,10.01,9.97,False
+Mercury 1.9.19,good,200B,28,success,41.4531852,10.01,9.86,False
+Mercury 1.9.19,good,200B,29,success,41.3756582,10.02,9.91,False
+Mercury 1.9.19,good,200B,30,success,41.3569531,10.04,9.88,False
+Mercury 1.9.19,moderate,10KiB,1,success,514.3105894,2.67,3.31,False
+Mercury 1.9.19,moderate,10KiB,2,success,494.2419892,2.52,3.32,False
+Mercury 1.9.19,moderate,10KiB,3,success,492.7380518,2.51,3.27,False
+Mercury 1.9.19,moderate,10KiB,4,success,471.1277621,2.51,3.44,False
+Mercury 1.9.19,moderate,10KiB,5,success,453.9978324,2.5,3.4,False
+Mercury 1.9.19,moderate,10KiB,6,success,494.8069143,2.51,3.29,False
+Mercury 1.9.19,moderate,10KiB,7,success,451.6126078,2.51,3.36,False
+Mercury 1.9.19,moderate,10KiB,8,success,488.7000612,2.53,3.27,False
+Mercury 1.9.19,moderate,10KiB,9,success,533.1086212,2.66,3.39,False
+Mercury 1.9.19,moderate,10KiB,10,success,473.320757,2.51,3.41,False
+Mercury 1.9.19,moderate,10KiB,11,success,472.0950827,2.52,3.35,False
+Mercury 1.9.19,moderate,10KiB,12,success,445.2680687,2.52,3.22,False
+Mercury 1.9.19,moderate,10KiB,13,success,444.0712169,2.51,3.4,False
+Mercury 1.9.19,moderate,10KiB,14,success,527.8128969,2.52,3.38,False
+Mercury 1.9.19,moderate,10KiB,15,success,446.4744062,2.5,3.46,False
+Mercury 1.9.19,moderate,10KiB,16,success,501.2749995,2.52,3.2,False
+Mercury 1.9.19,moderate,10KiB,17,success,488.5282275,2.5,3.43,False
+Mercury 1.9.19,moderate,10KiB,18,success,488.2907753,2.53,3.38,False
+Mercury 1.9.19,moderate,10KiB,19,success,477.9524369,2.49,4.16,False
+Mercury 1.9.19,moderate,10KiB,20,success,460.1826519,2.51,3.36,False
+Mercury 1.9.19,moderate,10KiB,21,success,470.679715,2.51,3.4,False
+Mercury 1.9.19,moderate,10KiB,22,success,442.598672,2.51,3.38,False
+Mercury 1.9.19,moderate,10KiB,23,success,458.30277,2.5,3.37,False
+Mercury 1.9.19,moderate,10KiB,24,success,538.5942457,2.54,3.3,False
+Mercury 1.9.19,moderate,10KiB,25,success,592.371704,2.52,3.47,False
+Mercury 1.9.19,moderate,10KiB,26,success,493.1668541,2.51,3.29,False
+Mercury 1.9.19,moderate,10KiB,27,success,469.2629305,2.51,3.35,False
+Mercury 1.9.19,moderate,10KiB,28,success,447.0263158,2.49,3.41,False
+Mercury 1.9.19,moderate,10KiB,29,success,450.6525515,2.52,4.13,False
+Mercury 1.9.19,moderate,10KiB,30,success,495.954615,2.52,3.2,False
+Mercury 1.9.19,moderate,200B,1,success,82.3643454,3.78,2.91,False
+Mercury 1.9.19,moderate,200B,2,success,105.3004064,2.93,2.97,False
+Mercury 1.9.19,moderate,200B,3,success,53.9480685,3.11,2.84,False
+Mercury 1.9.19,moderate,200B,4,success,57.7783571,3.06,2.86,False
+Mercury 1.9.19,moderate,200B,5,success,41.5818364,3.05,2.89,False
+Mercury 1.9.19,moderate,200B,6,success,57.3753745,3.07,2.85,False
+Mercury 1.9.19,moderate,200B,7,success,60.7551795,2.99,2.96,False
+Mercury 1.9.19,moderate,200B,8,success,53.8597224,3.06,2.84,False
+Mercury 1.9.19,moderate,200B,9,success,121.2043528,3.72,2.75,False
+Mercury 1.9.19,moderate,200B,10,success,53.8711941,3.08,2.88,False
+Mercury 1.9.19,moderate,200B,11,success,62.1301432,3.0,2.89,False
+Mercury 1.9.19,moderate,200B,12,success,65.6082305,3.1,2.82,False
+Mercury 1.9.19,moderate,200B,13,success,41.4385098,3.01,2.88,False
+Mercury 1.9.19,moderate,200B,14,success,61.1649607,2.98,3.02,False
+Mercury 1.9.19,moderate,200B,15,success,55.4369706,3.04,2.87,False
+Mercury 1.9.19,moderate,200B,16,success,41.2294338,3.03,2.85,False
+Mercury 1.9.19,moderate,200B,17,success,74.192376,3.07,2.89,False
+Mercury 1.9.19,moderate,200B,18,success,41.5512204,3.05,2.85,False
+Mercury 1.9.19,moderate,200B,19,success,53.8446677,3.08,2.88,False
+Mercury 1.9.19,moderate,200B,20,success,41.4561464,3.0,2.89,False
+Mercury 1.9.19,moderate,200B,21,success,41.5689537,3.04,2.88,False
+Mercury 1.9.19,moderate,200B,22,success,94.1353535,3.15,2.68,False
+Mercury 1.9.19,moderate,200B,23,success,54.0418583,3.1,2.85,False
+Mercury 1.9.19,moderate,200B,24,success,62.2260959,3.0,2.95,False
+Mercury 1.9.19,moderate,200B,25,success,78.3174987,3.0,2.75,False
+Mercury 1.9.19,moderate,200B,26,success,60.8827076,2.99,2.96,False
+Mercury 1.9.19,moderate,200B,27,success,61.2258674,3.0,3.02,False
+Mercury 1.9.19,moderate,200B,28,success,55.0040762,3.08,2.76,False
+Mercury 1.9.19,moderate,200B,29,success,77.8243408,3.02,2.92,False
+Mercury 1.9.19,moderate,200B,30,success,41.766873,3.05,2.88,False
+Mercury 1.9.19,poor,10KiB,1,success,2516.8937655,-0.14,-2.05,False
+Mercury 1.9.19,poor,10KiB,2,success,2026.1452656,-3.42,-2.08,False
+Mercury 1.9.19,poor,10KiB,3,success,2248.0886615,-0.91,-2.05,False
+Mercury 1.9.19,poor,10KiB,4,success,2376.1460726,-0.44,-2.24,False
+Mercury 1.9.19,poor,10KiB,5,success,2311.3630194,-0.2,-1.99,False
+Mercury 1.9.19,poor,10KiB,6,success,2196.7439468,-0.14,-1.93,False
+Mercury 1.9.19,poor,10KiB,7,success,2120.9036859,-3.43,-2.08,False
+Mercury 1.9.19,poor,10KiB,8,success,2165.0756721,-0.15,-1.96,False
+Mercury 1.9.19,poor,10KiB,9,success,2157.375376,-0.16,-2.31,False
+Mercury 1.9.19,poor,10KiB,10,success,2187.8579786,-3.43,-2.14,False
+Mercury 1.9.19,poor,10KiB,11,success,2125.626488,-0.16,-1.96,False
+Mercury 1.9.19,poor,10KiB,12,success,2319.7726625,-0.27,-2.19,False
+Mercury 1.9.19,poor,10KiB,13,success,2337.6933046,-0.16,-1.81,False
+Mercury 1.9.19,poor,10KiB,14,success,2280.4116452,-0.13,-1.92,False
+Mercury 1.9.19,poor,10KiB,15,success,2312.966135,-0.15,-2.04,False
+Mercury 1.9.19,poor,10KiB,16,success,2424.31218,-3.3,-2.36,False
+Mercury 1.9.19,poor,10KiB,17,success,2213.1830742,-0.22,-2.4,False
+Mercury 1.9.19,poor,10KiB,18,success,2152.4248096,-3.36,-2.27,False
+Mercury 1.9.19,poor,10KiB,19,success,2180.9184342,-0.19,-2.02,False
+Mercury 1.9.19,poor,10KiB,20,success,2103.6229016,-3.42,-2.22,False
+Mercury 1.9.19,poor,10KiB,21,success,2130.6771293,-3.43,-2.19,False
+Mercury 1.9.19,poor,10KiB,22,success,2115.9198333,-0.17,-2.0,False
+Mercury 1.9.19,poor,10KiB,23,success,2166.907878,-0.14,-1.97,False
+Mercury 1.9.19,poor,10KiB,24,success,2198.778582,-0.15,-1.9,False
+Mercury 1.9.19,poor,10KiB,25,success,2876.2847677,-0.51,-2.23,False
+Mercury 1.9.19,poor,10KiB,26,success,2231.1818276,-3.42,-2.11,False
+Mercury 1.9.19,poor,10KiB,27,success,2404.7065299,-0.23,-2.36,False
+Mercury 1.9.19,poor,10KiB,28,success,2469.119563,-3.36,-2.24,False
+Mercury 1.9.19,poor,10KiB,29,success,2203.7067013,-3.29,-2.18,False
+Mercury 1.9.19,poor,10KiB,30,success,2184.5645712,-0.2,-2.39,False
+Mercury 1.9.19,poor,200B,1,success,243.151486,-2.49,-2.42,False
+Mercury 1.9.19,poor,200B,2,success,99.972177,-1.71,-1.85,False
+Mercury 1.9.19,poor,200B,3,success,148.4098178,-1.82,-2.01,False
+Mercury 1.9.19,poor,200B,4,success,151.7366258,-3.21,-2.14,True
+Mercury 1.9.19,poor,200B,5,success,135.85757,-2.43,-1.92,False
+Mercury 1.9.19,poor,200B,6,success,99.0913553,-1.66,-1.86,False
+Mercury 1.9.19,poor,200B,7,success,146.588983,-3.18,-2.1,False
+Mercury 1.9.19,poor,200B,8,success,102.4938563,-1.05,-1.75,False
+Mercury 1.9.19,poor,200B,9,success,140.4787827,-3.18,-2.08,True
+Mercury 1.9.19,poor,200B,10,success,145.510872,-3.18,-2.09,True
+Mercury 1.9.19,poor,200B,11,success,177.2054911,-0.61,-1.75,False
+Mercury 1.9.19,poor,200B,12,success,134.6877395,-3.07,-2.16,False
+Mercury 1.9.19,poor,200B,13,success,167.4746473,-3.13,-2.01,False
+Mercury 1.9.19,poor,200B,14,success,143.7574782,-1.89,-3.24,False
+Mercury 1.9.19,poor,200B,15,success,146.2955089,-1.82,-1.95,False
+Mercury 1.9.19,poor,200B,16,success,164.0990928,-2.71,-2.03,False
+Mercury 1.9.19,poor,200B,17,success,186.1084434,-0.66,-1.75,False
+Mercury 1.9.19,poor,200B,18,success,110.446818,-2.85,-1.9,True
+Mercury 1.9.19,poor,200B,19,success,121.1323557,-2.41,-1.88,False
+Mercury 1.9.19,poor,200B,20,success,99.5662853,-1.66,-1.85,False
+Mercury 1.9.19,poor,200B,21,success,294.6011454,-2.98,-2.23,False
+Mercury 1.9.19,poor,200B,22,success,124.7855971,-1.45,-2.01,False
+Mercury 1.9.19,poor,200B,23,success,100.191103,-1.65,-1.86,False
+Mercury 1.9.19,poor,200B,24,success,189.3889475,-0.76,-1.96,False
+Mercury 1.9.19,poor,200B,25,success,119.0568662,-3.18,-2.08,True
+Mercury 1.9.19,poor,200B,26,success,138.6856484,-3.1,-2.06,False
+Mercury 1.9.19,poor,200B,27,success,241.2271129,-0.59,-1.86,False
+Mercury 1.9.19,poor,200B,28,success,98.4905576,-2.34,-1.86,False
+Mercury 1.9.19,poor,200B,29,success,99.7978169,-1.67,-1.86,False
+Mercury 1.9.19,poor,200B,30,success,170.76517,-0.86,-1.58,False
+VARA HF licensed,good,10KiB,1,success,381.1912018,7.62,10.36,False
+VARA HF licensed,good,10KiB,2,success,376.1048496,7.55,10.3,False
+VARA HF licensed,good,10KiB,3,success,264.1249443,6.75,9.58,False
+VARA HF licensed,good,10KiB,4,success,319.5488644,7.12,10.14,False
+VARA HF licensed,good,10KiB,5,success,285.9428639,6.79,9.63,False
+VARA HF licensed,good,10KiB,6,success,490.372825,8.41,10.13,False
+VARA HF licensed,good,10KiB,7,success,242.2443216,6.8,9.26,False
+VARA HF licensed,good,10KiB,8,success,310.5455226,7.09,10.35,False
+VARA HF licensed,good,10KiB,9,success,310.3513172,7.11,9.72,False
+VARA HF licensed,good,10KiB,10,success,452.4539824,8.14,9.84,False
+VARA HF licensed,good,10KiB,11,success,380.840782,7.51,9.71,False
+VARA HF licensed,good,10KiB,12,success,291.3285655,6.76,9.41,False
+VARA HF licensed,good,10KiB,13,success,406.8175016,7.82,9.46,False
+VARA HF licensed,good,10KiB,14,success,303.2480003,6.75,9.41,False
+VARA HF licensed,good,10KiB,15,success,331.8669174,7.13,9.94,False
+VARA HF licensed,good,10KiB,16,success,310.1340877,7.12,10.17,False
+VARA HF licensed,good,10KiB,17,success,337.491808,7.53,9.3,False
+VARA HF licensed,good,10KiB,18,success,302.3873356,7.26,10.08,False
+VARA HF licensed,good,10KiB,19,success,369.3503906,7.67,9.7,False
+VARA HF licensed,good,10KiB,20,success,281.5111152,6.85,9.9,False
+VARA HF licensed,good,10KiB,21,success,414.0732599,8.15,9.7,False
+VARA HF licensed,good,10KiB,22,success,336.3150982,7.67,9.5,False
+VARA HF licensed,good,10KiB,23,success,291.001732,7.15,9.32,False
+VARA HF licensed,good,10KiB,24,success,319.1835619,7.51,9.69,False
+VARA HF licensed,good,10KiB,25,success,313.2047538,7.01,9.24,False
+VARA HF licensed,good,10KiB,26,success,300.1560984,7.18,10.09,False
+VARA HF licensed,good,10KiB,27,success,295.786038,7.14,10.0,False
+VARA HF licensed,good,10KiB,28,success,382.7278171,7.62,9.73,False
+VARA HF licensed,good,10KiB,29,success,369.9569056,7.61,9.64,False
+VARA HF licensed,good,10KiB,30,success,263.0036972,6.81,10.26,False
+VARA HF licensed,good,200B,1,success,42.7717617,10.01,9.24,False
+VARA HF licensed,good,200B,2,success,32.1943611,9.38,9.26,False
+VARA HF licensed,good,200B,3,success,38.5181353,9.55,10.44,False
+VARA HF licensed,good,200B,4,success,36.9499413,9.43,11.1,False
+VARA HF licensed,good,200B,5,success,38.3266463,9.54,9.24,False
+VARA HF licensed,good,200B,6,success,32.3677794,9.46,10.49,False
+VARA HF licensed,good,200B,7,success,38.5382348,9.82,9.24,False
+VARA HF licensed,good,200B,8,success,33.2432105,9.38,10.17,False
+VARA HF licensed,good,200B,9,success,52.7958781,9.96,10.02,False
+VARA HF licensed,good,200B,10,success,32.6703774,9.38,10.65,False
+VARA HF licensed,good,200B,11,success,32.225337,9.39,9.25,False
+VARA HF licensed,good,200B,12,success,32.226747,9.38,9.25,False
+VARA HF licensed,good,200B,13,success,38.6809832,9.36,11.13,False
+VARA HF licensed,good,200B,14,success,38.3470091,9.55,9.24,False
+VARA HF licensed,good,200B,15,success,32.2091451,9.37,9.25,False
+VARA HF licensed,good,200B,16,success,38.0642021,9.54,9.24,False
+VARA HF licensed,good,200B,17,success,32.1377111,9.38,10.49,False
+VARA HF licensed,good,200B,18,success,38.0409617,9.54,9.24,False
+VARA HF licensed,good,200B,19,success,31.9908009,9.38,9.25,False
+VARA HF licensed,good,200B,20,success,31.9840354,9.38,9.24,False
+VARA HF licensed,good,200B,21,success,32.0191116,9.38,9.24,False
+VARA HF licensed,good,200B,22,success,32.0170509,9.38,9.23,False
+VARA HF licensed,good,200B,23,success,32.1717768,9.38,10.49,False
+VARA HF licensed,good,200B,24,success,32.1722258,9.38,10.48,False
+VARA HF licensed,good,200B,25,success,42.3283691,9.57,9.67,False
+VARA HF licensed,good,200B,26,success,38.2358603,9.6,10.44,False
+VARA HF licensed,good,200B,27,success,44.5198695,9.58,11.08,False
+VARA HF licensed,good,200B,28,success,38.0803948,9.54,9.24,False
+VARA HF licensed,good,200B,29,success,51.8853337,9.81,10.59,False
+VARA HF licensed,good,200B,30,success,38.8752843,9.55,10.74,False
+VARA HF licensed,moderate,10KiB,1,success,686.0601847,2.07,3.66,False
+VARA HF licensed,moderate,10KiB,2,success,624.1458116,1.9,3.87,False
+VARA HF licensed,moderate,10KiB,3,success,662.7146989,1.93,4.01,False
+VARA HF licensed,moderate,10KiB,4,success,663.8154147,1.98,3.94,False
+VARA HF licensed,moderate,10KiB,5,success,635.8489727,2.0,3.53,False
+VARA HF licensed,moderate,10KiB,6,success,588.4057357,1.61,4.03,False
+VARA HF licensed,moderate,10KiB,7,success,602.2157812,1.85,3.69,False
+VARA HF licensed,moderate,10KiB,8,success,607.9828225,1.77,3.77,False
+VARA HF licensed,moderate,10KiB,9,success,565.8980424,1.66,4.19,False
+VARA HF licensed,moderate,10KiB,10,success,607.898041,1.78,3.76,False
+VARA HF licensed,moderate,10KiB,11,success,664.8991341,2.03,3.75,False
+VARA HF licensed,moderate,10KiB,12,success,543.8864464,1.71,3.64,False
+VARA HF licensed,moderate,10KiB,13,success,623.2472898,1.92,3.89,False
+VARA HF licensed,moderate,10KiB,14,success,635.4640915,1.96,3.88,False
+VARA HF licensed,moderate,10KiB,15,success,566.1789942,1.89,3.63,False
+VARA HF licensed,moderate,10KiB,16,success,591.0039764,1.85,3.77,False
+VARA HF licensed,moderate,10KiB,17,success,706.4814336,2.04,3.85,False
+VARA HF licensed,moderate,10KiB,18,success,659.9832083,2.1,3.99,False
+VARA HF licensed,moderate,10KiB,19,success,605.1393039,1.79,4.1,False
+VARA HF licensed,moderate,10KiB,20,success,554.5992187,1.71,3.68,False
+VARA HF licensed,moderate,10KiB,21,success,647.5954474,1.88,3.74,False
+VARA HF licensed,moderate,10KiB,22,success,651.0450354,1.97,3.86,False
+VARA HF licensed,moderate,10KiB,23,success,688.1480387,2.03,3.84,False
+VARA HF licensed,moderate,10KiB,24,success,644.7836874,1.91,3.95,False
+VARA HF licensed,moderate,10KiB,25,success,624.0863703,1.83,3.61,False
+VARA HF licensed,moderate,10KiB,26,success,665.1196707,1.92,4.02,False
+VARA HF licensed,moderate,10KiB,27,success,655.3853083,2.04,3.73,False
+VARA HF licensed,moderate,10KiB,28,success,572.3499067,1.68,4.1,False
+VARA HF licensed,moderate,10KiB,29,success,581.4627013,1.83,3.87,False
+VARA HF licensed,moderate,10KiB,30,success,599.8460432,1.97,3.85,False
+VARA HF licensed,moderate,200B,1,success,43.0531649,3.03,4.0,False
+VARA HF licensed,moderate,200B,2,success,36.3366531,2.54,4.02,False
+VARA HF licensed,moderate,200B,3,success,35.8141924,2.81,3.59,False
+VARA HF licensed,moderate,200B,4,success,35.264748,2.87,2.24,False
+VARA HF licensed,moderate,200B,5,success,36.173866,2.87,3.72,False
+VARA HF licensed,moderate,200B,6,success,37.0615032,2.87,4.23,False
+VARA HF licensed,moderate,200B,7,success,41.9310358,2.53,4.21,False
+VARA HF licensed,moderate,200B,8,success,43.1152777,2.79,4.67,False
+VARA HF licensed,moderate,200B,9,success,36.8316063,3.02,2.24,False
+VARA HF licensed,moderate,200B,10,success,41.0262917,2.52,4.0,False
+VARA HF licensed,moderate,200B,11,success,35.4633081,2.82,3.44,False
+VARA HF licensed,moderate,200B,12,success,35.7976932,2.86,3.58,False
+VARA HF licensed,moderate,200B,13,success,42.1445428,2.88,4.13,False
+VARA HF licensed,moderate,200B,14,success,43.3932422,2.88,4.67,False
+VARA HF licensed,moderate,200B,15,success,50.3327991,3.19,4.25,False
+VARA HF licensed,moderate,200B,16,success,45.0836233,2.93,4.54,False
+VARA HF licensed,moderate,200B,17,success,43.5379259,3.03,4.14,False
+VARA HF licensed,moderate,200B,18,success,50.3385372,2.91,3.76,False
+VARA HF licensed,moderate,200B,19,success,43.4274889,2.99,4.15,False
+VARA HF licensed,moderate,200B,20,success,50.284798,3.19,4.2,False
+VARA HF licensed,moderate,200B,21,success,39.7435055,2.82,4.02,False
+VARA HF licensed,moderate,200B,22,success,51.3532899,2.9,3.36,False
+VARA HF licensed,moderate,200B,23,success,44.5939979,2.58,4.0,False
+VARA HF licensed,moderate,200B,24,success,46.254983,2.95,4.0,False
+VARA HF licensed,moderate,200B,25,success,38.683821,2.87,3.45,False
+VARA HF licensed,moderate,200B,26,success,46.932108,3.03,4.07,False
+VARA HF licensed,moderate,200B,27,success,40.211554,3.01,3.44,False
+VARA HF licensed,moderate,200B,28,success,45.6031648,3.0,3.63,False
+VARA HF licensed,moderate,200B,29,success,46.3313457,2.89,4.17,False
+VARA HF licensed,moderate,200B,30,success,47.9799198,2.92,4.03,False
+VARA HF licensed,poor,10KiB,1,success,1622.1987095,-2.99,-1.37,False
+VARA HF licensed,poor,10KiB,2,success,1521.4820442,-3.02,-1.36,False
+VARA HF licensed,poor,10KiB,3,success,1421.0351926,-3.18,-1.35,False
+VARA HF licensed,poor,10KiB,4,success,1535.569858,-3.08,-1.38,False
+VARA HF licensed,poor,10KiB,5,success,1517.7678239,-3.09,-1.34,False
+VARA HF licensed,poor,10KiB,6,success,1579.8788975,-3.01,-1.35,False
+VARA HF licensed,poor,10KiB,7,success,1753.3275773,-2.91,-1.37,False
+VARA HF licensed,poor,10KiB,8,success,1677.3204106,-2.94,-1.39,False
+VARA HF licensed,poor,10KiB,9,success,1620.9244916,-2.97,-1.36,False
+VARA HF licensed,poor,10KiB,10,success,1503.3242801,-3.02,-1.36,False
+VARA HF licensed,poor,10KiB,11,success,1428.1529474,-3.17,-1.32,False
+VARA HF licensed,poor,10KiB,12,success,1546.0828034,-3.06,-1.35,False
+VARA HF licensed,poor,10KiB,13,success,1628.7591451,-3.01,-1.36,False
+VARA HF licensed,poor,10KiB,14,success,1695.6375298,-2.96,-1.39,False
+VARA HF licensed,poor,10KiB,15,success,1650.5464849,-2.97,-1.35,False
+VARA HF licensed,poor,10KiB,16,success,1517.6566986,-3.04,-1.34,False
+VARA HF licensed,poor,10KiB,17,success,1657.5489174,-2.93,-1.34,False
+VARA HF licensed,poor,10KiB,18,success,1514.0699407,-2.95,-1.38,False
+VARA HF licensed,poor,10KiB,19,success,1559.8987715,-3.0,-1.36,False
+VARA HF licensed,poor,10KiB,20,success,1625.8657337,-2.99,-1.33,False
+VARA HF licensed,poor,10KiB,21,success,1517.4433045,-3.04,-1.37,False
+VARA HF licensed,poor,10KiB,22,success,1397.0528694,-3.13,-1.36,False
+VARA HF licensed,poor,10KiB,23,success,1611.3933694,-2.98,-1.37,False
+VARA HF licensed,poor,10KiB,24,success,1306.0946651,-3.18,-1.35,False
+VARA HF licensed,poor,10KiB,25,success,1599.1966518,-2.91,-1.37,False
+VARA HF licensed,poor,10KiB,26,success,1443.665618,-3.05,-1.37,False
+VARA HF licensed,poor,10KiB,27,success,1388.6472509,-3.16,-1.39,False
+VARA HF licensed,poor,10KiB,28,success,1473.3248388,-3.05,-1.34,False
+VARA HF licensed,poor,10KiB,29,success,1547.3950561,-3.02,-1.37,False
+VARA HF licensed,poor,10KiB,30,success,1550.7720691,-3.05,-1.35,False
+VARA HF licensed,poor,200B,1,success,61.3097254,-2.74,-1.26,False
+VARA HF licensed,poor,200B,2,success,81.5028863,-2.62,-1.27,False
+VARA HF licensed,poor,200B,3,success,62.339987,-2.88,-1.25,False
+VARA HF licensed,poor,200B,4,success,74.4517212,-2.75,-1.3,False
+VARA HF licensed,poor,200B,5,success,73.716476,-2.56,-1.48,False
+VARA HF licensed,poor,200B,6,success,62.9723024,-2.95,-1.26,False
+VARA HF licensed,poor,200B,7,success,81.9879255,-2.56,-1.45,False
+VARA HF licensed,poor,200B,8,success,84.8114417,-2.55,-1.31,False
+VARA HF licensed,poor,200B,9,success,77.3319041,-2.47,-1.27,False
+VARA HF licensed,poor,200B,10,success,111.8749007,-2.38,-1.27,False
+VARA HF licensed,poor,200B,11,success,67.3109886,-2.72,-1.29,False
+VARA HF licensed,poor,200B,12,success,69.8031051,-2.8,-1.26,False
+VARA HF licensed,poor,200B,13,success,64.8399412,-2.82,-1.29,False
+VARA HF licensed,poor,200B,14,success,59.6652327,-2.73,-1.51,False
+VARA HF licensed,poor,200B,15,success,91.560807,-2.67,-1.28,False
+VARA HF licensed,poor,200B,16,success,65.8698161,-2.95,-1.29,False
+VARA HF licensed,poor,200B,17,success,79.3113695,-2.76,-1.35,False
+VARA HF licensed,poor,200B,18,success,66.9117937,-2.58,-1.3,False
+VARA HF licensed,poor,200B,19,success,83.6023711,-2.61,-1.57,False
+VARA HF licensed,poor,200B,20,success,72.08984,-2.76,-1.48,False
+VARA HF licensed,poor,200B,21,success,68.6238564,-2.69,-1.29,False
+VARA HF licensed,poor,200B,22,success,60.2787702,-2.73,-1.26,False
+VARA HF licensed,poor,200B,23,success,70.1155025,-2.79,-1.26,False
+VARA HF licensed,poor,200B,24,success,69.6692891,-2.69,-1.27,False
+VARA HF licensed,poor,200B,25,success,69.6751255,-2.68,-1.27,False
+VARA HF licensed,poor,200B,26,success,68.0156221,-2.69,-1.26,False
+VARA HF licensed,poor,200B,27,success,70.8050202,-2.8,-1.25,False
+VARA HF licensed,poor,200B,28,success,77.5104473,-2.56,-1.27,False
+VARA HF licensed,poor,200B,29,success,70.5751231,-2.79,-1.26,False
+VARA HF licensed,poor,200B,30,success,75.4979168,-2.68,-1.25,False
+VARA HF unlicensed,good,10KiB,1,success,1180.3864047,9.53,9.89,False
+VARA HF unlicensed,good,10KiB,2,success,1184.8191748,9.53,10.11,False
+VARA HF unlicensed,good,10KiB,3,success,1193.702812,9.54,9.88,False
+VARA HF unlicensed,good,10KiB,4,success,1179.7869786,9.54,9.99,False
+VARA HF unlicensed,good,10KiB,5,success,1171.683522,9.54,10.2,False
+VARA HF unlicensed,good,10KiB,6,success,1181.83236,9.54,10.09,False
+VARA HF unlicensed,good,10KiB,7,success,1185.6566385,9.53,10.0,False
+VARA HF unlicensed,good,10KiB,8,success,1206.7637326,9.54,10.17,False
+VARA HF unlicensed,good,10KiB,9,success,1188.7796575,9.53,10.24,False
+VARA HF unlicensed,good,10KiB,10,success,1190.9000211,9.53,10.16,False
+VARA HF unlicensed,good,10KiB,11,success,1202.4730561,9.54,9.89,False
+VARA HF unlicensed,good,10KiB,12,success,1194.7250842,9.53,9.75,False
+VARA HF unlicensed,good,10KiB,13,success,1200.4820839,9.54,10.36,False
+VARA HF unlicensed,good,10KiB,14,success,1145.927243,9.53,10.12,False
+VARA HF unlicensed,good,10KiB,15,failure,,9.55,9.68,True
+VARA HF unlicensed,good,10KiB,16,success,1196.0421587,9.54,10.16,False
+VARA HF unlicensed,good,10KiB,17,success,1147.8076339,9.53,9.89,False
+VARA HF unlicensed,good,10KiB,18,success,1158.5749297,9.53,10.26,False
+VARA HF unlicensed,good,10KiB,19,failure,,9.53,9.78,True
+VARA HF unlicensed,good,10KiB,20,success,1194.9165499,9.54,9.95,False
+VARA HF unlicensed,good,10KiB,21,success,1157.1121489,9.53,9.87,False
+VARA HF unlicensed,good,10KiB,22,success,1167.1386912,9.53,10.0,False
+VARA HF unlicensed,good,10KiB,23,success,1181.840639,9.53,9.87,False
+VARA HF unlicensed,good,10KiB,24,success,1187.4903419,9.53,9.93,False
+VARA HF unlicensed,good,10KiB,25,success,1180.0990892,9.53,9.89,False
+VARA HF unlicensed,good,10KiB,26,success,1203.467088,9.53,10.23,False
+VARA HF unlicensed,good,10KiB,27,success,1195.7581081,9.54,10.02,False
+VARA HF unlicensed,good,10KiB,28,success,1200.0297624,9.54,9.96,False
+VARA HF unlicensed,good,10KiB,29,success,1200.9582153,9.54,10.13,False
+VARA HF unlicensed,good,10KiB,30,success,1144.7062122,9.53,10.03,False
+VARA HF unlicensed,good,200B,1,success,62.1871564,9.87,10.92,False
+VARA HF unlicensed,good,200B,2,success,62.1649807,9.87,10.92,False
+VARA HF unlicensed,good,200B,3,success,62.2287186,9.87,10.92,False
+VARA HF unlicensed,good,200B,4,success,62.2029137,9.87,10.91,False
+VARA HF unlicensed,good,200B,5,success,62.1836902,9.87,10.92,False
+VARA HF unlicensed,good,200B,6,success,63.2572493,9.91,10.92,False
+VARA HF unlicensed,good,200B,7,success,62.1375693,9.87,10.91,False
+VARA HF unlicensed,good,200B,8,success,62.2160858,9.87,10.92,False
+VARA HF unlicensed,good,200B,9,success,62.2090547,9.87,10.91,False
+VARA HF unlicensed,good,200B,10,success,62.8893577,9.87,11.05,False
+VARA HF unlicensed,good,200B,11,success,62.2529242,9.87,10.91,False
+VARA HF unlicensed,good,200B,12,success,62.2613156,9.87,10.92,False
+VARA HF unlicensed,good,200B,13,success,63.9622539,9.86,11.14,False
+VARA HF unlicensed,good,200B,14,success,62.1833807,9.86,10.91,False
+VARA HF unlicensed,good,200B,15,success,62.2954272,9.92,10.91,False
+VARA HF unlicensed,good,200B,16,success,62.6423464,9.87,11.05,False
+VARA HF unlicensed,good,200B,17,success,61.862132,9.87,10.91,False
+VARA HF unlicensed,good,200B,18,success,61.84872,9.87,10.92,False
+VARA HF unlicensed,good,200B,19,success,61.8176453,9.9,10.91,False
+VARA HF unlicensed,good,200B,20,success,63.1957184,9.86,11.08,False
+VARA HF unlicensed,good,200B,21,success,61.8740281,9.87,10.91,False
+VARA HF unlicensed,good,200B,22,success,61.8284998,9.87,10.91,False
+VARA HF unlicensed,good,200B,23,success,62.1842125,9.93,10.91,False
+VARA HF unlicensed,good,200B,24,success,61.7842974,9.86,10.91,False
+VARA HF unlicensed,good,200B,25,success,61.8076064,9.87,10.91,False
+VARA HF unlicensed,good,200B,26,success,62.8652109,9.93,11.05,False
+VARA HF unlicensed,good,200B,27,success,62.4769952,9.87,11.04,False
+VARA HF unlicensed,good,200B,28,success,61.8584055,9.87,10.92,False
+VARA HF unlicensed,good,200B,29,success,62.5052844,9.87,11.04,False
+VARA HF unlicensed,good,200B,30,success,61.8084726,9.87,10.91,False
+VARA HF unlicensed,moderate,10KiB,1,success,1223.0110406,2.57,3.91,False
+VARA HF unlicensed,moderate,10KiB,2,success,1216.7477442,2.55,4.04,False
+VARA HF unlicensed,moderate,10KiB,3,success,1199.50112,2.54,3.74,False
+VARA HF unlicensed,moderate,10KiB,4,success,1221.7810919,2.55,3.78,False
+VARA HF unlicensed,moderate,10KiB,5,success,1216.4624415,2.54,3.62,False
+VARA HF unlicensed,moderate,10KiB,6,success,1221.0735662,2.54,3.66,False
+VARA HF unlicensed,moderate,10KiB,7,success,1199.8756242,2.55,3.9,False
+VARA HF unlicensed,moderate,10KiB,8,failure,,2.54,4.02,True
+VARA HF unlicensed,moderate,10KiB,9,success,1213.1625143,2.56,3.88,False
+VARA HF unlicensed,moderate,10KiB,10,failure,,2.53,3.79,True
+VARA HF unlicensed,moderate,10KiB,11,success,1247.1410897,2.56,3.78,False
+VARA HF unlicensed,moderate,10KiB,12,success,1211.1839993,2.54,3.75,False
+VARA HF unlicensed,moderate,10KiB,13,success,1242.1640183,2.57,3.74,False
+VARA HF unlicensed,moderate,10KiB,14,success,1199.0349528,2.54,4.01,False
+VARA HF unlicensed,moderate,10KiB,15,success,1195.1281646,2.55,3.73,False
+VARA HF unlicensed,moderate,10KiB,16,success,1206.3477318,2.54,3.9,False
+VARA HF unlicensed,moderate,10KiB,17,success,1198.1716284,2.55,3.97,False
+VARA HF unlicensed,moderate,10KiB,18,success,1222.4772092,2.55,3.86,False
+VARA HF unlicensed,moderate,10KiB,19,success,1191.2002252,2.54,3.73,False
+VARA HF unlicensed,moderate,10KiB,20,success,1231.4914763,2.56,3.86,False
+VARA HF unlicensed,moderate,10KiB,21,success,1230.2708291,2.56,3.97,False
+VARA HF unlicensed,moderate,10KiB,22,success,1172.1040757,2.54,3.58,False
+VARA HF unlicensed,moderate,10KiB,23,success,1174.2837633,2.54,4.02,False
+VARA HF unlicensed,moderate,10KiB,24,success,1169.4980209,2.54,3.84,False
+VARA HF unlicensed,moderate,10KiB,25,success,1208.2123419,2.56,3.98,False
+VARA HF unlicensed,moderate,10KiB,26,success,1189.7534286,2.55,3.98,False
+VARA HF unlicensed,moderate,10KiB,27,success,1220.4445879,2.57,3.94,False
+VARA HF unlicensed,moderate,10KiB,28,success,1187.0945096,2.55,3.79,False
+VARA HF unlicensed,moderate,10KiB,29,success,1210.4756066,2.54,3.91,False
+VARA HF unlicensed,moderate,10KiB,30,success,1200.0238193,2.54,4.0,False
+VARA HF unlicensed,moderate,200B,1,success,63.3285267,2.89,4.11,False
+VARA HF unlicensed,moderate,200B,2,success,59.7142398,2.92,4.21,False
+VARA HF unlicensed,moderate,200B,3,success,60.9736427,2.92,4.52,False
+VARA HF unlicensed,moderate,200B,4,success,68.0587762,2.89,4.27,False
+VARA HF unlicensed,moderate,200B,5,success,60.311803,2.9,4.2,False
+VARA HF unlicensed,moderate,200B,6,success,61.4262522,2.95,4.38,False
+VARA HF unlicensed,moderate,200B,7,success,61.3980855,3.2,4.06,False
+VARA HF unlicensed,moderate,200B,8,success,70.1360746,2.92,4.58,False
+VARA HF unlicensed,moderate,200B,9,success,66.6437879,3.19,4.23,False
+VARA HF unlicensed,moderate,200B,10,success,58.585152,2.87,3.91,False
+VARA HF unlicensed,moderate,200B,11,success,58.6931015,2.87,3.91,False
+VARA HF unlicensed,moderate,200B,12,success,60.7277328,2.88,4.2,False
+VARA HF unlicensed,moderate,200B,13,success,61.7753476,2.87,4.27,False
+VARA HF unlicensed,moderate,200B,14,success,60.924899,2.93,4.32,False
+VARA HF unlicensed,moderate,200B,15,success,61.4133234,3.2,3.91,False
+VARA HF unlicensed,moderate,200B,16,success,60.8775164,2.92,4.18,False
+VARA HF unlicensed,moderate,200B,17,success,68.1018117,3.18,3.95,False
+VARA HF unlicensed,moderate,200B,18,success,60.9821668,2.9,4.15,False
+VARA HF unlicensed,moderate,200B,19,success,77.3209577,3.15,4.13,False
+VARA HF unlicensed,moderate,200B,20,success,62.232443,3.2,4.0,False
+VARA HF unlicensed,moderate,200B,21,success,61.9749655,2.87,4.35,False
+VARA HF unlicensed,moderate,200B,22,success,62.288771,2.88,4.23,False
+VARA HF unlicensed,moderate,200B,23,success,60.3098068,2.87,4.06,False
+VARA HF unlicensed,moderate,200B,24,success,60.919204,2.95,3.92,False
+VARA HF unlicensed,moderate,200B,25,success,60.5768359,2.87,4.04,False
+VARA HF unlicensed,moderate,200B,26,success,62.574744,3.2,3.98,False
+VARA HF unlicensed,moderate,200B,27,success,60.3078474,2.9,3.99,False
+VARA HF unlicensed,moderate,200B,28,success,64.3485642,3.2,4.47,False
+VARA HF unlicensed,moderate,200B,29,success,61.157139,2.9,4.21,False
+VARA HF unlicensed,moderate,200B,30,success,62.2442774,2.87,4.38,False
+VARA HF unlicensed,poor,10KiB,1,success,1536.2360066,-3.1,-1.36,False
+VARA HF unlicensed,poor,10KiB,2,success,1484.2850987,-3.15,-1.36,False
+VARA HF unlicensed,poor,10KiB,3,success,1470.553323,-3.18,-1.32,False
+VARA HF unlicensed,poor,10KiB,4,success,1575.5488179,-3.1,-1.36,False
+VARA HF unlicensed,poor,10KiB,5,success,1558.8739969,-3.11,-1.37,False
+VARA HF unlicensed,poor,10KiB,6,success,1571.7182105,-3.09,-1.37,False
+VARA HF unlicensed,poor,10KiB,7,success,1611.0053411,-3.09,-1.33,False
+VARA HF unlicensed,poor,10KiB,8,success,1491.3146061,-3.22,-1.4,False
+VARA HF unlicensed,poor,10KiB,9,success,1489.4005323,-3.14,-1.35,False
+VARA HF unlicensed,poor,10KiB,10,success,1425.5610676,-3.18,-1.33,False
+VARA HF unlicensed,poor,10KiB,11,success,1487.3534652,-3.18,-1.33,False
+VARA HF unlicensed,poor,10KiB,12,success,1464.5944999,-3.16,-1.36,False
+VARA HF unlicensed,poor,10KiB,13,success,1478.9541235,-3.15,-1.33,False
+VARA HF unlicensed,poor,10KiB,14,success,1466.9041643,-3.17,-1.34,False
+VARA HF unlicensed,poor,10KiB,15,success,1496.4294479,-3.11,-1.35,False
+VARA HF unlicensed,poor,10KiB,16,success,1542.6637444,-3.06,-1.34,False
+VARA HF unlicensed,poor,10KiB,17,success,1550.7176208,-3.13,-1.32,False
+VARA HF unlicensed,poor,10KiB,18,failure,,-3.1,-1.35,True
+VARA HF unlicensed,poor,10KiB,19,success,1524.7536908,-3.07,-1.37,False
+VARA HF unlicensed,poor,10KiB,20,success,1448.5761259,-3.21,-1.33,False
+VARA HF unlicensed,poor,10KiB,21,success,1541.5709218,-3.12,-1.36,False
+VARA HF unlicensed,poor,10KiB,22,success,1606.0566079,-3.1,-1.35,False
+VARA HF unlicensed,poor,10KiB,23,success,1576.1578832,-3.08,-1.35,False
+VARA HF unlicensed,poor,10KiB,24,success,1488.0916949,-3.18,-1.37,False
+VARA HF unlicensed,poor,10KiB,25,success,1610.1873633,-3.07,-1.34,False
+VARA HF unlicensed,poor,10KiB,26,success,1609.772453,-3.05,-1.35,False
+VARA HF unlicensed,poor,10KiB,27,success,1442.0243343,-3.16,-1.35,False
+VARA HF unlicensed,poor,10KiB,28,success,1432.2947121,-3.19,-1.36,False
+VARA HF unlicensed,poor,10KiB,29,success,1461.1581961,-3.14,-1.43,False
+VARA HF unlicensed,poor,10KiB,30,success,1547.6079744,-3.09,-1.36,False
+VARA HF unlicensed,poor,200B,1,success,74.8070131,-2.66,-1.45,False
+VARA HF unlicensed,poor,200B,2,success,104.7499356,-2.57,-1.62,False
+VARA HF unlicensed,poor,200B,3,success,77.1985954,-2.46,-1.42,False
+VARA HF unlicensed,poor,200B,4,success,67.743336,-2.81,-1.24,False
+VARA HF unlicensed,poor,200B,5,success,67.8733175,-2.81,-1.24,False
+VARA HF unlicensed,poor,200B,6,success,68.2854681,-2.68,-1.43,False
+VARA HF unlicensed,poor,200B,7,success,81.4103298,-2.62,-1.25,False
+VARA HF unlicensed,poor,200B,8,success,67.1000669,-2.71,-1.3,False
+VARA HF unlicensed,poor,200B,9,success,70.0521047,-2.8,-1.24,False
+VARA HF unlicensed,poor,200B,10,success,84.402653,-2.74,-1.23,False
+VARA HF unlicensed,poor,200B,11,success,69.481319,-2.68,-1.24,False
+VARA HF unlicensed,poor,200B,12,success,78.8796378,-2.81,-1.31,False
+VARA HF unlicensed,poor,200B,13,success,70.469059,-2.8,-1.46,False
+VARA HF unlicensed,poor,200B,14,success,76.426246,-2.65,-1.24,False
+VARA HF unlicensed,poor,200B,15,success,83.9255522,-2.54,-1.25,False
+VARA HF unlicensed,poor,200B,16,success,68.2148956,-2.94,-1.27,False
+VARA HF unlicensed,poor,200B,17,success,69.1643147,-2.69,-1.24,False
+VARA HF unlicensed,poor,200B,18,success,69.944003,-2.68,-1.24,False
+VARA HF unlicensed,poor,200B,19,success,69.9984836,-2.58,-1.24,False
+VARA HF unlicensed,poor,200B,20,success,78.7660337,-2.69,-1.24,False
+VARA HF unlicensed,poor,200B,21,success,64.1777376,-2.69,-1.31,False
+VARA HF unlicensed,poor,200B,22,success,64.7897514,-2.58,-1.24,False
+VARA HF unlicensed,poor,200B,23,success,67.7423085,-2.57,-1.31,False
+VARA HF unlicensed,poor,200B,24,success,72.101981,-2.68,-1.23,False
+VARA HF unlicensed,poor,200B,25,success,65.7295159,-2.68,-1.24,False
+VARA HF unlicensed,poor,200B,26,success,62.0773969,-2.81,-1.63,False
+VARA HF unlicensed,poor,200B,27,success,64.4785001,-2.79,-1.24,False
+VARA HF unlicensed,poor,200B,28,success,66.5283747,-2.69,-1.44,False
+VARA HF unlicensed,poor,200B,29,success,63.9409516,-2.59,-1.43,False
+VARA HF unlicensed,poor,200B,30,success,65.8509413,-2.8,-1.24,False
