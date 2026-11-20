@@ -91,3 +91,18 @@ version of each modem; arms run in sequence, not interleaved; effective SNR depe
 the reference chosen (equal RMS from the starting mode); several bench-software versions
 during P1 (0.2.0-alpha.5 to alpha.9; none changed the channel, payload or success rule);
 30 attempts per cell (Wilson lower bound 88.6 % at 30/30).
+
+## Supplement - Table S1, bench software versions in the counted attempts
+
+Counted attempt = the last run of each P1 tag on PC A (540 tags). Channel profiles, seeds,
+payloads and the success rule are the same in every version; each run records its version.
+
+| Version | Release | Exe SHA-256 (16 hex) | Counted attempts | Why |
+|---|---|---|---|---|
+| 0.2.0-alpha.5 | 2026-11-13 | 3BD56BC2C211B88D | 46 (Mercury) | first P1 release |
+| 0.2.0-alpha.6 | 2026-11-13 | EB8936B58883A940 | 130 (Mercury) | Mercury crash; Start at |
+| 0.2.0-alpha.7 | 2026-11-15 | 94D030E5E4A0163C | 84 (Mercury 4, VARA lic. 80) | Windows path limit in cross-check |
+| 0.2.0-alpha.8 | 2026-11-17 | 88A989023F54DE1A | 192 (VARA lic. 100, unlic. 92) | PCs out of step; session check (one not-counted rule added) |
+| 0.2.0-alpha.9 | 2026-11-18 | 28D5BF1BD7AD79E5 | 88 (VARA unlic.) | 30 s silence before an attempt starts |
+
+Raw results of both PCs: `data/phase1_raw/`.
